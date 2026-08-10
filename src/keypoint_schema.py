@@ -78,3 +78,89 @@ def normalize(kp: np.ndarray) -> np.ndarray:
 def flatten(kp: np.ndarray) -> np.ndarray:
     """(N_KEYPOINTS, 2) -> (FEATURE_DIM,) 1차원, 모델 입력용"""
     return kp.reshape(-1).astype(np.float32)
+
+# ============================================================
+# MediaPipe(웹캠) -> 공통 포맷 변환  (keypoint_schema.py 맨 아래에 추가)
+# ------------------------------------------------------------
+# 주의: OpenPose(학습데이터)는 "인체 기준" 좌/우,
+#       MediaPipe는 "화면 기준" 좌/우 -> 정면에서 서로 반대.
+#       swap_lr=True 로 두 시스템의 좌/우를 맞춘다. (검증 후 확정)
+# ------------------------------------------------------------
+
+# MediaPipe Pose 33개 중 우리가 쓸 관절 인덱스 (공식 문서 기준)
+MP_POSE = {
+    "nose": 0,
+    "l_shoulder": 11, "r_shoulder": 12,   # MediaPipe 화면 기준 이름
+    "l_elbow": 13,    "r_elbow": 14,
+    "l_wrist": 15,    "r_wrist": 16,
+}
+
+
+def _mp_pose_xy(pose_landmarks, image_w, image_h):
+    """MediaPipe pose_landmarks -> {관절이름: (x,y)} 픽셀좌표 딕셔너리.
+       MediaPipe는 0~1 정규화 좌표를 주므로 이미지 크기를 곱해 픽셀로."""
+    out = {}
+    lm = pose_landmarks.landmark
+    for name, idx in MP_POSE.items():
+        out[name] = np.array([lm[idx].x * image_w, lm[idx].y * image_h],
+                             dtype=np.float32)
+    return out
+
+
+def _mp_hand_xy(hand_landmarks, image_w, image_h):
+    """MediaPipe 손 21점 -> (21,2) 픽셀좌표. 감지 실패 시 None."""
+    if hand_landmarks is None:
+        return None
+    lm = hand_landmarks.landmark
+    arr = np.array([[p.x * image_w, p.y * image_h] for p in lm],
+                   dtype=np.float32)
+    return arr  # (21,2)
+
+
+def mediapipe_to_common(results, image_w, image_h, swap_lr=True) -> np.ndarray:
+    """
+    MediaPipe Holistic results(한 프레임) -> 공통 포맷 (N_KEYPOINTS, 2).
+    OpenPose 학습데이터와 동일한 순서(POSE_ORDER + 왼손21 + 오른손21)로 맞춘다.
+
+    swap_lr=True: MediaPipe(화면기준) 좌/우를 OpenPose(인체기준)에 맞게 바꿈.
+                  (웹캠 flip을 끈 상태 기준. 검증 후 최종 확정할 것.)
+    """
+    # --- 상체(pose) ---
+    if results.pose_landmarks is None:
+        pose_sel = np.zeros((N_POSE, 2), dtype=np.float32)
+    else:
+        mp_pose = _mp_pose_xy(results.pose_landmarks, image_w, image_h)
+        # neck은 MediaPipe에 없음 -> 양 어깨 중점으로 계산
+        neck = (mp_pose["l_shoulder"] + mp_pose["r_shoulder"]) / 2.0
+
+        if swap_lr:
+            # 공통포맷 r_* (인체 오른쪽) <- MediaPipe l_* (화면 왼쪽)
+            r_sh, r_el, r_wr = mp_pose["l_shoulder"], mp_pose["l_elbow"], mp_pose["l_wrist"]
+            l_sh, l_el, l_wr = mp_pose["r_shoulder"], mp_pose["r_elbow"], mp_pose["r_wrist"]
+        else:
+            r_sh, r_el, r_wr = mp_pose["r_shoulder"], mp_pose["r_elbow"], mp_pose["r_wrist"]
+            l_sh, l_el, l_wr = mp_pose["l_shoulder"], mp_pose["l_elbow"], mp_pose["l_wrist"]
+
+        pose_map = {
+            "nose": mp_pose["nose"], "neck": neck,
+            "r_shoulder": r_sh, "r_elbow": r_el, "r_wrist": r_wr,
+            "l_shoulder": l_sh, "l_elbow": l_el, "l_wrist": l_wr,
+        }
+        pose_sel = np.stack([pose_map[j] for j in POSE_ORDER])  # (8,2)
+
+    # --- 손 ---
+    lh = _mp_hand_xy(results.left_hand_landmarks, image_w, image_h)
+    rh = _mp_hand_xy(results.right_hand_landmarks, image_w, image_h)
+
+    if swap_lr:
+        # 공통포맷 왼손 <- MediaPipe 오른손, 공통포맷 오른손 <- MediaPipe 왼손
+        common_lhand, common_rhand = rh, lh
+    else:
+        common_lhand, common_rhand = lh, rh
+
+    if common_lhand is None:
+        common_lhand = np.zeros((21, 2), dtype=np.float32)
+    if common_rhand is None:
+        common_rhand = np.zeros((21, 2), dtype=np.float32)
+
+    return np.concatenate([pose_sel, common_lhand, common_rhand], axis=0)  # (50,2)

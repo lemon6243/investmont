@@ -1,7 +1,13 @@
-﻿venv/
-__pycache__/
+﻿# 데이터/모델 (용량 큼, 깃에 올리지 않음)
 dataset/
+dataset_all/
 *.npy
 *.pt
-data/
+
+# 파이썬 가상환경/캐시
+venv/
+__pycache__/
+*.pyc
+
+# 원본 수어 영상 데이터
 수어 영상/

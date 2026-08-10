@@ -18,8 +18,7 @@ from load_dataset import (
 # ------------------------------------------------------------
 MORPHEME = r"C:\Users\LG\Downloads\수어 영상\1.Training\[라벨]01_real_word_morpheme"
 KEYPOINT = r"C:\Users\LG\Downloads\수어 영상\1.Training\[라벨]01_real_word_keypoint"
-
-TOP_N = 10          # 첫 실행 때만 사용 (단어 목록 고정 후엔 무시됨)
+TOP_N = 50          # 첫 실행 때만 사용 (단어 목록 고정 후엔 무시됨)
 ANGLES = None       # None=전 각도, ['F']=정면만
 OUT_DIR = "dataset"
 
@@ -103,10 +102,11 @@ def main():
     # 기존 누적 데이터 & 처리이력 불러오기
     # ----------------------------------------------------
     if os.path.exists(X_PATH):
-        X_old = np.load(X_PATH)
-        y_old = np.load(Y_PATH)
-        g_old = np.load(G_PATH)
+        X_old = np.load(X_PATH, allow_pickle=True)
+        y_old = np.load(Y_PATH, allow_pickle=True)
+        g_old = np.load(G_PATH, allow_pickle=True)
         print(">> 기존 누적 데이터:", X_old.shape)
+
     else:
         X_old = np.zeros((0, SEQ_LEN, FEATURE_DIM), dtype=np.float32)
         y_old = np.zeros((0,), dtype=np.int64)

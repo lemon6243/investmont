@@ -1,8 +1,8 @@
-# build_npy.py  (누적/이어붙이기 버전)
-# 사용법:
-#   - 처음 실행: 상위 TOP_N 단어를 자동 선정해 target_words.json에 고정 + 데이터 누적
-#   - 이후 실행(새 keypoint zip 풀고): 같은 단어 목록으로 새 클립만 추가 누적
-# 특징: 이미 처리한 클립은 processed_clips.json에 기록 -> 중복 방지
+# collect_all.py
+# 목적: 압축을 하나씩 풀 때마다, 그 안의 "모든 단어" 클립을 누적 저장.
+#       (특정 단어만 고르지 않음 -> 버리는 것 없이 전부 자산화)
+# 사용법: 압축 하나 풀 때마다 실행 -> "이번에 추가된 샘플" 확인 -> 원본 폴더 삭제 -> 반복
+# 주의: dataset_all/ 폴더는 절대 지우지 말 것 (여기에 데이터가 쌓임)
 
 import os
 import json
@@ -14,21 +14,18 @@ from load_dataset import (
 )
 
 # ------------------------------------------------------------
-# 설정
+# 설정 (경로는 본인 환경에 맞게)
 # ------------------------------------------------------------
 MORPHEME = r"C:\Users\LG\Downloads\수어 영상\1.Training\[라벨]01_real_word_morpheme"
 KEYPOINT = r"C:\Users\LG\Downloads\수어 영상\1.Training\[라벨]01_real_word_keypoint"
 
-TOP_N = 10          # 첫 실행 때만 사용 (단어 목록 고정 후엔 무시됨)
 ANGLES = None       # None=전 각도, ['F']=정면만
-OUT_DIR = "dataset"
+OUT_DIR = "dataset_all"   # 기존 dataset과 분리 (모든 단어 누적용)
 
-TARGET_PATH = os.path.join(OUT_DIR, "target_words.json")
 PROCESSED_PATH = os.path.join(OUT_DIR, "processed_clips.json")
-X_PATH = os.path.join(OUT_DIR, "X.npy")
-Y_PATH = os.path.join(OUT_DIR, "y.npy")
-G_PATH = os.path.join(OUT_DIR, "groups.npy")
-L_PATH = os.path.join(OUT_DIR, "label2idx.json")
+X_PATH = os.path.join(OUT_DIR, "X_all.npy")
+Y_PATH = os.path.join(OUT_DIR, "y_all.npy")      # 라벨을 "단어 문자열"로 저장
+G_PATH = os.path.join(OUT_DIR, "groups_all.npy")
 
 
 def load_json(path, default):
@@ -44,8 +41,7 @@ def save_json(path, obj):
 
 
 def scan_morpheme_meta(morpheme_files, video_map):
-    """morpheme을 읽어 (name, label, start, end) 목록과 단어별 개수 반환"""
-    word_count = Counter()
+    """morpheme을 읽어 (name, label, start, end) 목록 반환 (단어 필터 없음)"""
     meta = []
     for i, mf in enumerate(morpheme_files):
         if i % 40000 == 0:
@@ -63,9 +59,8 @@ def scan_morpheme_meta(morpheme_files, video_map):
         label = m["data"][0]["attributes"][0]["name"]
         start = m["data"][0]["start"]
         end = m["data"][0]["end"]
-        word_count[label] += 1
         meta.append((name, label, start, end))
-    return meta, word_count
+    return meta
 
 
 def main():
@@ -79,51 +74,32 @@ def main():
     print(">> morpheme JSON 개수:", len(morpheme_files))
 
     print(">> morpheme 메타 스캔 중...")
-    meta, word_count = scan_morpheme_meta(morpheme_files, video_map)
+    meta = scan_morpheme_meta(morpheme_files, video_map)
     print(">> 현재 매칭되는 클립 수:", len(meta))
-
-    # ----------------------------------------------------
-    # 목표 단어 목록: 처음이면 선정+저장, 있으면 불러오기(고정)
-    # ----------------------------------------------------
-    target = load_json(TARGET_PATH, None)
-    if target is None:
-        target_words = [w for w, c in word_count.most_common(TOP_N)]
-        label2idx = {w: i for i, w in enumerate(sorted(target_words))}
-        save_json(TARGET_PATH, {"words": target_words, "label2idx": label2idx})
-        save_json(L_PATH, label2idx)
-        print(f">> [최초] 상위 {TOP_N}단어 고정:", target_words)
-    else:
-        target_words = target["words"]
-        label2idx = target["label2idx"]
-        print(f">> [기존] 고정된 {len(target_words)}단어 사용")
-
-    top_set = set(target_words)
 
     # ----------------------------------------------------
     # 기존 누적 데이터 & 처리이력 불러오기
     # ----------------------------------------------------
     if os.path.exists(X_PATH):
         X_old = np.load(X_PATH)
-        y_old = np.load(Y_PATH)
-        g_old = np.load(G_PATH)
+        y_old = np.load(Y_PATH, allow_pickle=True)   # 문자열 배열이라 pickle 허용
+        g_old = np.load(G_PATH, allow_pickle=True)
         print(">> 기존 누적 데이터:", X_old.shape)
     else:
         X_old = np.zeros((0, SEQ_LEN, FEATURE_DIM), dtype=np.float32)
-        y_old = np.zeros((0,), dtype=np.int64)
+        y_old = np.array([], dtype=object)
         g_old = np.array([], dtype=object)
 
     processed = set(load_json(PROCESSED_PATH, []))
     print(">> 이미 처리한 클립 수:", len(processed))
 
     # ----------------------------------------------------
-    # 새 클립만 로딩 (목표 단어 & 아직 처리 안 한 것)
+    # 새 클립 로딩 (단어 필터 없음, 아직 처리 안 한 것 전부)
     # ----------------------------------------------------
     print(">> 새 클립 로딩 중...")
     Xn, yn, gn = [], [], []
     added = 0
     for name, label, start, end in meta:
-        if label not in top_set:
-            continue
         if name in processed:          # 이미 처리한 클립은 건너뜀
             continue
         video_dir = video_map[name]
@@ -131,7 +107,7 @@ def main():
         if seq is None:
             continue
         Xn.append(seq)
-        yn.append(label2idx[label])
+        yn.append(label)               # 단어 문자열 그대로 저장
         gn.append(name.rsplit("_", 1)[0])
         processed.add(name)
         added += 1
@@ -145,8 +121,8 @@ def main():
     # ----------------------------------------------------
     if added > 0:
         Xn = np.array(Xn, dtype=np.float32)
-        yn = np.array(yn, dtype=np.int64)
-        gn = np.array(gn)
+        yn = np.array(yn, dtype=object)
+        gn = np.array(gn, dtype=object)
         X = np.concatenate([X_old, Xn], axis=0)
         y = np.concatenate([y_old, yn], axis=0)
         g = np.concatenate([g_old, gn], axis=0)
@@ -154,17 +130,19 @@ def main():
         X, y, g = X_old, y_old, g_old
 
     np.save(X_PATH, X)
-    np.save(Y_PATH, y)
+    np.save(Y_PATH, y)     # 문자열 배열 저장
     np.save(G_PATH, g)
     save_json(PROCESSED_PATH, sorted(processed))
 
-    print(">> 누적 데이터 총량:", X.shape, " 라벨수:", len(set(y.tolist())))
+    print(">> 누적 데이터 총량:", X.shape, " 서로 다른 단어 수:", len(set(y.tolist())))
     print(">> 저장 완료 ->", os.path.abspath(OUT_DIR))
 
-    # 단어별 샘플 수 요약
-    idx2label = {v: k for k, v in label2idx.items()}
-    per_word = Counter(idx2label[int(v)] for v in y)
-    print(">> 단어별 샘플 수:", dict(per_word))
+    # 단어별 샘플 수 요약 (상위 20개만 표시)
+    per_word = Counter(y.tolist())
+    top20 = per_word.most_common(20)
+    print(">> 단어별 샘플 수 상위 20:")
+    for w, c in top20:
+        print(f"     {w:10s} {c}")
 
 
 if __name__ == "__main__":
