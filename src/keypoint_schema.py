@@ -117,7 +117,7 @@ def _mp_hand_xy(hand_landmarks, image_w, image_h):
     return arr  # (21,2)
 
 
-def mediapipe_to_common(results, image_w, image_h, swap_lr=True) -> np.ndarray:
+def mediapipe_to_common(results, image_w, image_h, swap_lr=False) -> np.ndarray:
     """
     MediaPipe Holistic results(한 프레임) -> 공통 포맷 (N_KEYPOINTS, 2).
     OpenPose 학습데이터와 동일한 순서(POSE_ORDER + 왼손21 + 오른손21)로 맞춘다.
