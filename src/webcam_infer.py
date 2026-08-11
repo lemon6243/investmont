@@ -1,12 +1,14 @@
 # webcam_infer.py
 # 모듈 4: 웹캠 실시간 수어 인식 (연속 모드 + 트리거 모드 전환 가능)
-# 흐름: 웹캠 -> MediaPipe Holistic -> 공통포맷 변환 -> 정규화 -> 60프레임 시퀀스 -> LSTM 예측 -> 화면 출력
+# 트리거 모드에서는 단어를 누적해 문장으로 조립 -> LLM 문장화 -> TTS 음성 출력
 #
 # 조작키
-#   m     : 모드 전환 (연속 <-> 트리거)
-#   space : (트리거 모드에서) 60프레임 녹화 시작
-#   c     : 현재 시퀀스 버퍼 비우기
-#   q     : 종료
+#   m         : 모드 전환 (연속 <-> 트리거)
+#   space     : (트리거 모드) 단어 1개 녹화(60프레임) -> 문장 버퍼에 추가
+#   enter     : (트리거 모드) 지금까지 쌓인 단어들로 문장 완성 + 음성 출력
+#   backspace : (트리거 모드) 마지막에 추가한 단어 1개 취소
+#   c         : 버퍼/문장 모두 비우기
+#   q         : 종료
 
 import os
 import cv2
@@ -19,8 +21,12 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import mediapipe as mp
 from keypoint_schema import mediapipe_to_common, normalize, flatten, FEATURE_DIM
 from tts import make_tts
+from sentence_builder import build_sentence, APILLM   # ← 추가: 문장 조립 모듈
+
 tts = make_tts("offline")   # 또는 "online"
-last_spoken = None          # 마지막으로 읽은 단어 (중복 방지)
+
+# ← 추가: LLM 백엔드 준비 (환경변수 CLOVA_API_KEY 없으면 규칙+폴백만 작동)
+sentence_llm = APILLM(model="HCX-DASH-002")
 
 
 # ------------------------------------------------------------
@@ -29,7 +35,7 @@ last_spoken = None          # 마지막으로 읽은 단어 (중복 방지)
 CKPT_PATH = os.path.join("dataset", "sign_lstm.pt")
 SWAP_LR = False   # check_lr.py로 검증된 값
 USE_FLIP = False  # check_lr.py로 검증된 값
-CONF_THRESHOLD = 0.30  # 이 확률 미만이면 "인식 안됨"으로 표시
+CONF_THRESHOLD = 0.30  # 이 확률 미만이면 단어를 문장에 추가하지 않음
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -78,7 +84,7 @@ print("=" * 55)
 print("[모듈 4] 웹캠 실시간 수어 인식 시작")
 print(f"  클래스 수: {ckpt['n_classes']}  SEQ_LEN: {SEQ_LEN}")
 print(f"  학습 테스트 정확도: {ckpt.get('test_acc', '?')}")
-print("  m=모드전환  space=녹화(트리거)  c=버퍼비우기  q=종료")
+print("  m=모드전환  space=단어녹화  enter=문장완성  backspace=취소  c=비우기  q=종료")
 print("=" * 55)
 
 # ------------------------------------------------------------
@@ -90,7 +96,6 @@ def predict(seq_frames):
         return None, 0.0
     arr = np.stack(seq_frames)  # (T, FEATURE_DIM)
     T = arr.shape[0]
-    # SEQ_LEN에 맞춰 패딩(뒤쪽 0) 또는 뒤에서 SEQ_LEN개만 사용
     if T < SEQ_LEN:
         pad = np.zeros((SEQ_LEN - T, FEATURE_DIM), dtype=np.float32)
         arr = np.concatenate([arr, pad], axis=0)
@@ -99,7 +104,7 @@ def predict(seq_frames):
         arr = arr[-SEQ_LEN:]
         length = SEQ_LEN
 
-    x = torch.tensor(arr[None, ...], dtype=torch.float32, device=device)  # (1, SEQ_LEN, F)
+    x = torch.tensor(arr[None, ...], dtype=torch.float32, device=device)
     lengths = torch.tensor([length], dtype=torch.long)
     with torch.no_grad():
         logits = model(x, lengths)
@@ -120,11 +125,14 @@ def frame_to_vector(results, w, h):
 # ------------------------------------------------------------
 mp_holistic = mp.solutions.holistic
 
-mode = "continuous"          # "continuous" 또는 "trigger"
+mode = "continuous"              # "continuous" 또는 "trigger"
 buffer = deque(maxlen=SEQ_LEN)   # 연속 모드용 최근 프레임 버퍼
-recording = False            # 트리거 모드 녹화 중 여부
-record_frames = []           # 트리거 모드 녹화 버퍼
+recording = False                # 트리거 모드 녹화 중 여부
+record_frames = []               # 트리거 모드 녹화 버퍼
 last_label, last_conf = "-", 0.0
+
+sentence_words = []              # ← 추가: 트리거로 쌓은 단어들
+current_sentence = ""            # ← 추가: 완성된 문장
 
 cap = cv2.VideoCapture(0)
 if not cap.isOpened():
@@ -156,7 +164,6 @@ with mp_holistic.Holistic(
         # ----- 모드별 동작 -----
         if mode == "continuous":
             buffer.append(vec)
-            # 버퍼가 어느 정도 차면 매 프레임 예측
             if len(buffer) >= max(10, SEQ_LEN // 2):
                 label, conf = predict(list(buffer))
                 if conf >= CONF_THRESHOLD:
@@ -171,10 +178,10 @@ with mp_holistic.Holistic(
                     recording = False
                     record_frames = []
 
-                    # ← 여기부터 추가: 예측이 확정되면 음성으로 읽기
-                    if last_label != "-" and last_label != last_spoken:
-                        tts.speak(last_label)
-                        last_spoken = last_label
+                    # ← 변경: 여기서 단어를 읽지 않고, 문장 버퍼에 "추가"만 한다
+                    if last_label != "-" and last_conf >= CONF_THRESHOLD:
+                        sentence_words.append(last_label)
+                        current_sentence = ""   # 새 단어 추가되면 이전 완성문장 초기화
 
         # ----- 화면 표시 -----
         mode_txt = "CONTINUOUS" if mode == "continuous" else "TRIGGER"
@@ -187,13 +194,23 @@ with mp_holistic.Holistic(
                 cv2.putText(image, status, (10, 60),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             else:
-                cv2.putText(image, "press SPACE to record", (10, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+                cv2.putText(image, "SPACE=word  ENTER=sentence  BKSP=undo", (10, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
 
-        # 예측 결과 (큰 글씨)
-        result_txt = f"{last_label}  ({last_conf*100:.0f}%)"
-        cv2.putText(image, result_txt, (10, h - 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 255, 0), 3)
+            # ← 추가: 지금까지 쌓인 단어들 표시
+            words_txt = " + ".join(sentence_words) if sentence_words else "(none)"
+            cv2.putText(image, f"WORDS: {words_txt}", (10, 95),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        # 방금 인식한 단어 (작게)
+        result_txt = f"last: {last_label} ({last_conf*100:.0f}%)"
+        cv2.putText(image, result_txt, (10, h - 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # ← 추가: 완성된 문장 (크게)
+        if current_sentence:
+            cv2.putText(image, current_sentence, (10, h - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
 
         cv2.imshow("SignBridge - Realtime (Module 4)", image)
 
@@ -207,14 +224,28 @@ with mp_holistic.Holistic(
             record_frames = []
             recording = False
             last_label, last_conf = "-", 0.0
+            sentence_words = []          # ← 추가
+            current_sentence = ""        # ← 추가
         elif key == ord('c'):
             buffer.clear()
             record_frames = []
             recording = False
             last_label, last_conf = "-", 0.0
+            sentence_words = []          # ← 추가
+            current_sentence = ""        # ← 추가
         elif key == ord(' ') and mode == "trigger":
             recording = True
             record_frames = []
+        elif key in (13, 10) and mode == "trigger":   # ← 추가: Enter = 문장 완성
+            if sentence_words:
+                current_sentence = build_sentence(sentence_words, llm=sentence_llm)
+                print(f"[문장] {sentence_words}  ->  {current_sentence}")
+                tts.speak(current_sentence)      # 문장 전체를 음성으로
+                sentence_words = []              # 다음 문장을 위해 비움
+        elif key == 8 and mode == "trigger":          # ← 추가: Backspace = 마지막 단어 취소
+            if sentence_words:
+                removed = sentence_words.pop()
+                print(f"[취소] {removed}")
 
 cap.release()
 cv2.destroyAllWindows()
