@@ -25,10 +25,13 @@ KEYPOINT = r"C:\Users\LG\Downloads\수어 영상\1.Training\[라벨]01_real_word
 ANGLES = None       # None=전 각도, ['F']=정면만
 OUT_DIR = "dataset_all"   # 기존 dataset과 분리 (모든 단어 누적용)
 
-PROCESSED_PATH = os.path.join(OUT_DIR, "processed_clips.json")
 X_PATH = os.path.join(OUT_DIR, "X_all_3d.npy")
-Y_PATH = os.path.join(OUT_DIR, "y_all.npy")      # 라벨을 "단어 문자열"로 저장
-G_PATH = os.path.join(OUT_DIR, "groups_all.npy")
+Y_PATH = os.path.join(OUT_DIR, "y_all_3d.npy")
+G_PATH = os.path.join(OUT_DIR, "groups_all_3d.npy")
+PROCESSED_PATH = os.path.join(
+    OUT_DIR,
+    "processed_clips_3d.json"
+)
 
 
 def load_json(path, default):
