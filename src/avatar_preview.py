@@ -69,8 +69,8 @@ RHAND_START = N_POSE + N_HAND
 # 2) 좌표 변환
 # ------------------------------------------------------------
 def to_pixel(kp_xy):
-    scale = CANVAS * 0.22
-    cx, cy = CANVAS // 2, int(CANVAS * 0.42)
+    scale = CANVAS * 0.16
+    cx, cy = CANVAS // 2, int(CANVAS * 0.52)
     return int(cx + kp_xy[0] * scale), int(cy + kp_xy[1] * scale)
 
 
