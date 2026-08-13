@@ -11,3 +11,7 @@ __pycache__/
 
 # 원본 수어 영상 데이터
 수어 영상/
+
+echo dataset_all/ >> .gitignore
+echo dataset_all_3d/ >> .gitignore
+echo __pycache__/ >> .gitignore

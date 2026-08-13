@@ -1,8 +1,7 @@
-import os
-D = "dataset_all"
-for f in ["X_all.npy", "y_all.npy", "groups_all.npy", "processed_clips.json"]:
-    p = os.path.join(D, f)
-    if os.path.exists(p):
-        os.remove(p)
-        print("삭제:", f)
-print("초기화 완료 - 이제 0부터 다시 쌓입니다")
+import numpy as np
+Xr = np.load("dataset_all_3d/X_raw_3d.npy")
+absmax = np.abs(Xr)
+print("500(=5m) 넘는 값 비율:", round(float((absmax > 500).mean()), 5))
+print("1000(=10m) 넘는 값 비율:", round(float((absmax > 1000).mean()), 6))
+print("99.9 퍼센타일:", round(float(np.percentile(absmax, 99.9)), 1))
+print("99 퍼센타일:", round(float(np.percentile(absmax, 99)), 1))

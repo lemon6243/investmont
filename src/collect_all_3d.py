@@ -6,10 +6,7 @@
 
 import os
 import json
-<<<<<<< HEAD
 import shutil
-=======
->>>>>>> a2ec07948fd0f1ff142fc7f72027ed07cbd278b1
 import numpy as np
 from collections import Counter
 from load_dataset_3d import (
@@ -44,7 +41,6 @@ def load_json(path, default):
     return default
 
 
-<<<<<<< HEAD
 def save_json_atomic(path, obj):
     """임시 파일에 먼저 쓰고 성공하면 이름 교체 (저장 중 깨짐 방지)"""
     tmp = path + ".tmp"
@@ -81,11 +77,6 @@ def check_free_space(target_dir, need_bytes, margin=1.5):
             f"디스크 공간 부족: {free/1e9:.2f} GB 남음, "
             f"약 {required/1e9:.2f} GB 필요. 공간을 확보한 뒤 다시 실행하세요."
         )
-=======
-def save_json(path, obj):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
->>>>>>> a2ec07948fd0f1ff142fc7f72027ed07cbd278b1
 
 
 def scan_morpheme_meta(morpheme_files, video_map):
@@ -99,11 +90,7 @@ def scan_morpheme_meta(morpheme_files, video_map):
         if not m["data"]:
             continue
         name = m["metaData"]["name"].replace(".mp4", "")
-<<<<<<< HEAD
         angle = name.split("_")[-1]
-=======
-                angle = name.split("_")[-1]
->>>>>>> a2ec07948fd0f1ff142fc7f72027ed07cbd278b1
         if ANGLES and angle not in ANGLES:
             continue
         if name not in video_map:
@@ -138,7 +125,6 @@ def main():
         y_old = np.load(Y_PATH, allow_pickle=True)
         g_old = np.load(G_PATH, allow_pickle=True)
         print(">> 기존 누적 인식용:", X_old.shape, " 아바타용:", Xr_old.shape)
-<<<<<<< HEAD
 
         # --- 무결성 체크: 네 배열 길이가 어긋나면 즉시 중단 ---
         if not (len(X_old) == len(Xr_old) == len(y_old) == len(g_old)):
@@ -148,8 +134,6 @@ def main():
                 f"-> 저장이 중간에 끊겼거나 파일이 손상된 상태입니다. "
                 f"dataset_all_3d 의 파일들을 정리한 뒤 처음부터 다시 수집하세요."
             )
-=======
->>>>>>> a2ec07948fd0f1ff142fc7f72027ed07cbd278b1
     else:
         X_old = np.zeros((0, SEQ_LEN, FEATURE_DIM), dtype=np.float32)
         Xr_old = np.zeros((0, SEQ_LEN, N_KEYPOINTS, 3), dtype=np.float32)
@@ -159,7 +143,6 @@ def main():
     processed = set(load_json(PROCESSED_PATH, []))
     print(">> 이미 처리한 클립 수:", len(processed))
 
-<<<<<<< HEAD
     # X가 없는데 processed 기록만 남아 있는 위험 상태 감지
     if len(X_old) == 0 and len(processed) > 0:
         raise ValueError(
@@ -169,8 +152,6 @@ def main():
             f"파일을 모두 지우고 처음부터 다시 수집하세요."
         )
 
-=======
->>>>>>> a2ec07948fd0f1ff142fc7f72027ed07cbd278b1
     # ----------------------------------------------------
     # 새 클립 로딩 (단어 필터 없음, 아직 처리 안 한 것 전부)
     # ----------------------------------------------------
@@ -196,11 +177,7 @@ def main():
     print(">> 이번에 추가된 샘플:", added)
 
     # ----------------------------------------------------
-<<<<<<< HEAD
     # 합치기
-=======
-    # 합치고 저장
->>>>>>> a2ec07948fd0f1ff142fc7f72027ed07cbd278b1
     # ----------------------------------------------------
     if added > 0:
         Xn = np.array(Xn, dtype=np.float32)
@@ -214,7 +191,6 @@ def main():
     else:
         X, Xr_all, y, g = X_old, Xr_old, y_old, g_old
 
-<<<<<<< HEAD
     # ----------------------------------------------------
     # 저장 (디스크 공간 확인 -> atomic 저장)
     # ----------------------------------------------------
@@ -226,13 +202,6 @@ def main():
     save_npy_atomic(Y_PATH, y)
     save_npy_atomic(G_PATH, g)
     save_json_atomic(PROCESSED_PATH, sorted(processed))
-=======
-    np.save(X_PATH, X)
-    np.save(XR_PATH, Xr_all)
-    np.save(Y_PATH, y)
-    np.save(G_PATH, g)
-    save_json(PROCESSED_PATH, sorted(processed))
->>>>>>> a2ec07948fd0f1ff142fc7f72027ed07cbd278b1
 
     print(">> 누적 인식용:", X.shape, " 아바타용:", Xr_all.shape,
           " 서로 다른 단어 수:", len(set(y.tolist())))
