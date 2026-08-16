@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignBridge 마스터 설계도 Ver 4.0</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+    background:#f4f6fa; color:#1f2733; line-height:1.7;
+    padding:40px 16px;
+  }
+  .page {
+    max-width:900px; margin:0 auto; background:#fff;
+    border-radius:14px; box-shadow:0 6px 28px rgba(0,0,0,.08);
+    padding:56px 60px; margin-bottom:32px;
+  }
+  h1 {
+    font-size:30px; color:#1a2b4a; border-bottom:4px solid #2f6df6;
+    padding-bottom:14px; margin-bottom:8px;
+  }
+  .subtitle { color:#5a6a85; font-size:15px; margin-bottom:6px; }
+  .version-badge {
+    display:inline-block; background:#2f6df6; color:#fff;
+    font-size:13px; font-weight:700; padding:4px 14px;
+    border-radius:20px; margin:14px 0 28px;
+  }
+  h2 {
+    font-size:21px; color:#1a2b4a; margin:36px 0 14px;
+    padding-left:12px; border-left:5px solid #2f6df6;
+  }
+  h3 { font-size:16px; color:#2f4468; margin:22px 0 10px; }
+  p { margin-bottom:12px; }
+  .note {
+    background:#eef4ff; border:1px solid #cfe0ff; border-radius:8px;
+    padding:14px 18px; font-size:14px; color:#2c4470; margin:14px 0;
+  }
+  .warn {
+    background:#fff5e9; border:1px solid #ffd9a8; border-radius:8px;
+    padding:14px 18px; font-size:14px; color:#8a5300; margin:14px 0;
+  }
+  table { width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; }
+  th, td { border:1px solid #dde3ec; padding:9px 12px; text-align:left; vertical-align:top; }
+  th { background:#eef2f8; color:#26364f; font-weight:700; }
+  tr:nth-child(even) td { background:#fafbfd; }
+  .st { font-weight:700; font-size:12px; padding:2px 9px; border-radius:12px; color:#fff; white-space:nowrap; }
+  .done   { background:#22a06b; }
+  .prog   { background:#2f6df6; }
+  .plan   { background:#8a94a6; }
+  .vision { background:#9b59b6; }
+  .change { background:#e67e22; }
+  ol, ul { margin:8px 0 12px 24px; }
+  li { margin-bottom:6px; }
+  .flow {
+    background:#0f1b2d; color:#d7e3f4; font-family:'Consolas',monospace;
+    font-size:12px; line-height:1.5; padding:22px; border-radius:10px;
+    overflow-x:auto; white-space:pre; margin:16px 0;
+  }
+  .story {
+    background:linear-gradient(135deg,#1a2b4a,#2f6df6); color:#fff;
+    border-radius:12px; padding:26px 30px; margin:18px 0; font-size:15px;
+  }
+  .footer { text-align:center; color:#9aa6b8; font-size:12px; margin-top:20px; }
+  @media print {
+    body { background:#fff; padding:0; }
+    .page { box-shadow:none; margin:0; border-radius:0; padding:30px 34px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>SignBridge 마스터 설계도</h1>
+  <p class="subtitle">한국수어 양방향 소통 시스템 · 사용자↔Claude 공동개발</p>
+  <p class="subtitle">텍스트→수어: 2D 프로토타입 → 언리얼 3D MetaHuman 아바타로 전환</p>
+  <span class="version-badge">Version 4.0</span>
+
+  <div class="note">
+    <strong>이 문서의 목적:</strong> 실제로 완성된 것과 앞으로 할 것을 정직하게 구분 기록한다.
+    상태는 <b>완료 / 진행중 / 예정 / 비전</b>으로 표시. 무단 축약·누락 금지.
+  </div>
+
+  <h2>이번 개정 핵심 (Ver 3.2 → 4.0)</h2>
+  <ol>
+    <li><b>최종 방향성 변경:</b> 2D 캐릭터 아바타 → <b>언리얼 MetaHuman(Skye) 기반 실물급 3D 아바타</b>가 메인 트랙으로 승격. 2D는 품질 한계로 폴백 보존.</li>
+    <li><b>데이터 근본 문제 발견 & 해결:</b> AI Hub 좌표는 <b>위치만 있고 회전 좌표가 없음</b> → 3D 자연스러운 구동 불가. 실제 동영상을 <b>언리얼 마커리스 모캡으로 재처리해 회전 애니메이션 추출</b>(손가락 포함)로 해결.</li>
+    <li><b>수집 아키텍처 = 하이브리드 확정:</b> 인식용(위치) 파이프라인은 유지, 아바타용(회전)은 별도 "회전 데이터 뱅크" 신설.</li>
+  </ol>
+
+  <h2>최종 목표</h2>
+  <p>병원·은행·관공서 창구에서 농인↔직원의 <b>양방향 실시간 소통</b>.</p>
+  <ul>
+    <li><b>[A방향] 수어→텍스트·음성:</b> 웹캠 인식 → 문장 조립 → 음성 출력 (E2E 완성)</li>
+    <li><b>[B방향] 텍스트→수어 아바타:</b> 타이핑 → 글로스 → 언리얼 3D MetaHuman이 실물처럼 수어 시연</li>
+    <li><b>상용화 비전:</b> 실사용자(농인↔일반인) 간 실시간 양방향 커뮤니케이션. 궁극적으로 임의 입력 문장을 3D 아바타가 실시간 수어로 변환.</li>
+  </ul>
+
+  <h2>현재 위치</h2>
+  <ul>
+    <li><b>[A방향]</b> 완성 유지. 웹캠 인식(학습단어 98%) → 단어 누적 → 문장 조립(규칙+LLM) → 음성 출력 E2E.</li>
+    <li><b>[B방향]</b> 방향 전환. 2D 캐릭터는 검증 완료했으나 품질 한계로 메인 제외. 언리얼 5.8 MetaHuman Animator로 실제 영상→회전 애니메이션 추출 파이프라인 검증 완료(WORD1501, 손가락 포함).</li>
+    <li><b>다음 관문:</b> ① 회전 데이터 뱅크 포맷 결정 ② 데모 단어 애니메이션 제작 ③ GUI 연결 방식 결정.</li>
+  </ul>
+
+  <h2>전체 진행률</h2>
+  <table>
+    <tr><th>영역</th><th>상태</th><th>진행</th></tr>
+    <tr><td>모듈 0~1 · 환경/키포인트</td><td><span class="st done">완료</span></td><td>100%</td></tr>
+    <tr><td>모듈 2 · 데이터 수집(AI Hub)</td><td><span class="st prog">진행중</span></td><td>04/12</td></tr>
+    <tr><td>모듈 3 · 학습</td><td><span class="st done">완료</span></td><td>동작확인(40.6%)</td></tr>
+    <tr><td>모듈 4 · 실시간 추론 + TTS</td><td><span class="st done">완료</span></td><td>E2E검증</td></tr>
+    <tr><td>모듈 5 · 웹캠 자체 데이터 수집</td><td><span class="st prog">진행중</span></td><td>도구완성</td></tr>
+    <tr><td>모듈 7 · 단어→문장 변환(LLM)</td><td><span class="st done">완료</span></td><td>API연동</td></tr>
+    <tr><td><b>모듈 9 · 텍스트→수어 아바타</b></td><td><span class="st change">재편</span></td><td>2D 검증완료 → 3D 전환</td></tr>
+    <tr><td><b>모듈 9-U · 언리얼 3D 파이프라인 (신설)</b></td><td><span class="st prog">진행중</span></td><td>회전추출 PoC 성공</td></tr>
+    <tr><td>모듈 6 · 문장 데모(병원/은행)</td><td><span class="st plan">예정</span></td><td>—</td></tr>
+    <tr><td>모듈 8 · 연속수어 세그멘테이션</td><td><span class="st plan">예정</span></td><td>—</td></tr>
+    <tr><td>모듈 10~11 · 창구통합·API화</td><td><span class="st vision">비전</span></td><td>—</td></tr>
+  </table>
+
+  <h2>모듈 9 · 텍스트→수어 아바타 (재편)</h2>
+  <table>
+    <tr><th>상태</th><th>항목 / 파일</th><th>결과</th></tr>
+    <tr><td><span class="st done">완료</span></td><td>2D 캐릭터 렌더링 (avatar_preview.py)</td><td>품질 한계로 메인 제외, 폴백 보존</td></tr>
+    <tr><td><span class="st done">완료</span></td><td>한국어→수어 글로스 (text_to_gloss.py)</td><td>3D 트랙에서도 그대로 재사용</td></tr>
+    <tr><td><span class="st done">완료</span></td><td>텍스트→수어 재생 (text_to_sign.py)</td><td>재생 백엔드만 3D로 교체 예정</td></tr>
+    <tr><td><span class="st done">완료</span></td><td>모션 블렌딩(보간)</td><td>중립경유·빈프레임제거·스무딩</td></tr>
+    <tr><td><span class="st change">전환</span></td><td>재생 백엔드 2D → 언리얼 3D</td><td>모듈 9-U로 이관</td></tr>
+  </table>
+  <div class="note"><b>정직한 판단:</b> "문장→글로스→단어 시퀀스" 로직은 자산으로 살아남는다. 바뀌는 건 맨 끝 렌더링 단(2D 그림 → 언리얼 3D 영상/스트림)뿐이다.</div>
+
+  <h2>모듈 9-U · 언리얼 3D 아바타 파이프라인 (신설)</h2>
+  <table>
+    <tr><th>상태</th><th>항목</th><th>결과 / 목표</th></tr>
+    <tr><td><span class="st done">완료</span></td><td>회전 데이터 문제 진단</td><td>AI Hub 좌표=위치만, 회전 없음 → 3D 구동 불가 확인</td></tr>
+    <tr><td><span class="st done">완료</span></td><td>MetaHuman Animator 마커리스 모캡 PoC</td><td>실제 영상→회전 애니메이션(AS_MHP_WORD1501_Body) 추출 성공, 손가락 포함</td></tr>
+    <tr><td><span class="st done">완료</span></td><td>회색 마네킹(SK_MHP) 애니메이션 검증</td><td>Use Animation Asset로 뼈대 정상 구동 확인</td></tr>
+    <tr><td><span class="st prog">진행중</span></td><td>MetaHuman Skye 적용</td><td>메모리(8GB VRAM)·드래그드롭 제약. 마네킹 검증 후 Skye 교체 전략</td></tr>
+    <tr><td><span class="st plan">예정</span></td><td>회전 데이터 뱅크 설계 (핵심 결정)</td><td>FBB/애님(품질) vs npy/json(경량·확장)</td></tr>
+    <tr><td><span class="st plan">예정</span></td><td>데모 단어별 애니메이션 제작</td><td>병원/은행 대본 단어 → 회전 추출</td></tr>
+    <tr><td><span class="st plan">예정</span></td><td>GUI 연결 방식 확정</td><td>사전렌더 MP4 vs 실시간 UDP</td></tr>
+  </table>
+  <div class="warn">
+    <b>⚠ 정직한 한계 &amp; 결정 대기:</b>
+    <ul>
+      <li><b>실시간 UDP의 벽:</b> send_skeleton_ubp.py는 여전히 위치 좌표 전송 → 위치→회전 변환 블루프린트 없으면 고품질 불가. 실시간 마커리스 모캡은 현재 오프라인 전용.</li>
+      <li><b>안정성 vs 실시간성:</b> 사전렌더 MP4=최고 품질·안정·손가락 해결(정해진 단어만). 실시간 UDP=임의 입력 가능하나 변환 미완성·손가락 노이즈·프리징 위험.</li>
+      <li><b>하드웨어 제약:</b> Skye 로드에 10GB 필요, 가용 8.3GB. 데모 시 무거운 프로그램 종료 필수.</li>
+    </ul>
+  </div>
+
+  <h2>데이터 수집 아키텍처 (하이브리드 확정)</h2>
+<div class="flow">                    ┌─────────────────────────────────────┐
+                    │        원천 데이터 소스              │
+                    │  AI Hub 영상/좌표 · 실제 수어 동영상 │
+                    └───────────────┬─────────────────────┘
+          ┌─────────────────────────┴──────────────────────────┐
+   ┌──────▼───────────────────┐              ┌──────────────────▼──────────────┐
+   │ [A방향] 인식용 (위치좌표)  │              │ [B방향] 아바타용 (회전데이터)     │
+   │  현행 유지                │              │  신설                            │
+   ├──────────────────────────┤              ├──────────────────────────────────┤
+   │ collect_all.py (2D)      │              │ 언리얼 MetaHuman Animator         │
+   │ collect_all_3d.py (3D)   │              │  (마커리스 모캡, 회전 추출)        │
+   │  → X_all_3d (인식학습용)  │              │  → AS_MHP_*  (회전 애니메이션)    │
+   │  ※ 절대 수정 금지          │              │  → 회전 데이터 뱅크 (FBX/npy)     │
+   └──────┬───────────────────┘              └──────────────────┬────────────────┘
+   ┌──────▼───────────────────┐              ┌──────────────────▼────────────────┐
+   │ LSTM 인식 → 문장조립(LLM) │              │ text_to_gloss (재사용)            │
+   │ → TTS 음성출력            │              │ → 단어별 회전 애니메이션 조회·연결 │
+   └──────────────────────────┘              │ → 언리얼 3D 아바타 재생(MP4/UDP)  │
+                    │                        └──────────────────┬────────────────┘
+                    └──────────────┬───────────────────────────┘
+                                   ▼
+                     signbridge_gui.py (통합 데모 화면)</div>
+
+  <h3>핵심 원칙</h3>
+  <ol>
+    <li><b>인식용(A방향)은 손대지 않는다.</b> LSTM은 위치 좌표만 있으면 되므로 기존 로직 유지.</li>
+    <li><b>아바타용(B방향)은 회전 데이터 뱅크 신설.</b> 언리얼 모캡 회전값을 단어 단위로 저장.</li>
+    <li><b>text_to_gloss가 두 세계의 다리.</b> 문장→글로스 로직 공유, 마지막 재생 단만 3D 교체.</li>
+    <li><b>없는 단어는 "표현 불가" 안내.</b> 회전 뱅크에 없는 단어는 정직하게 처리.</li>
+  </ol>
+
+  <h2>다음 실행 순서</h2>
+  <ol>
+    <li><b>[결정]</b> 회전 데이터 뱅크 저장 포맷 — FBX(품질) vs npy·json(확장성).</li>
+    <li><b>[결정]</b> GUI 연결 방식 — 사전렌더 MP4(안정) vs 실시간 UDP(실시간성).</li>
+    <li>회색 마네킹으로 재생 파이프라인 완전 검증 → 안정화 후 Skye 교체.</li>
+    <li>병원/은행 데모 대본 확정 → 단어별 언리얼 회전 애니메이션 제작.</li>
+    <li>signbridge_gui.py B패널 렌더링을 2D → 3D 결과물로 교체.</li>
+    <li>양방향 통합 데모 화면(수어→음성 + 텍스트→3D 아바타).</li>
+    <li>(병렬) AI Hub 05~12 수집 + 웹캠 보강 → 인식 재학습 (A방향).</li>
+    <li>(비전) 실시간 위치→회전 변환 엔진 → 진짜 실시간 양방향 상용화.</li>
+  </ol>
+
+  <h2>투자 발표 스토리</h2>
+  <div class="story">
+    ① 수어→텍스트·음성 완성(웹캠 98%→문장→음성) →
+    ② 텍스트→수어를 <b>2D 프로토타입에서 언리얼 실물급 3D 아바타로 진화</b>(회전 데이터 자체 추출 기술 확보) →
+    ③ 병원·은행 창구 문장 데모 →
+    ④ <b>실시간 양방향 커뮤니케이션 상용화</b> + API 라이선스 사업.
+    <br><br>
+    <b>경쟁력:</b> 남의 아바타를 재생하는 게 아니라, AI Hub에 없던 회전 데이터를 우리가 직접 모캡으로 추출·구축하고 그 위에 글로스 번역·모션 블렌딩·3D 렌더링 엔진을 자체 개발했다.
+  </div>
+
+  <p class="footer">SignBridge Master Blueprint v4.0 · 사용자↔Claude 공동개발</p>
+</div>
+</body>
+</html>

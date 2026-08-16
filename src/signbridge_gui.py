@@ -1,6 +1,7 @@
 # signbridge_gui.py
 import sys
 import os
+import time
 import numpy as np
 import cv2
 import torch
@@ -20,10 +21,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 
-# ── 프로젝트 모듈 재사용 ──
-from avatar_preview import draw_frame, CANVAS, FPS
+from avatar_preview import draw_frame, FPS
 from text_to_gloss import text_to_gloss, GlossLLM
 from text_to_sign import build_word_bank, make_neutral_pose, build_full_sequence
+from ue_bridge import UeBridge, try_load_3d_clip, stream_clip
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CKPT_PATH = os.path.join(BASE_DIR, "dataset", "sign_lstm.pt")
@@ -34,9 +35,15 @@ DATA_DIR = os.path.join(BASE_DIR, "dataset_all")
 X_PATH = os.path.join(DATA_DIR, "X_all.npy")
 Y_PATH = os.path.join(DATA_DIR, "y_all.npy")
 
-BG="#0f1117"; CARD="#1a1d29"; CARD_LINE="#2a2e3d"; TEXT="#e6e8ef"
-SUBTEXT="#8b90a3"; ACCENT="#5b8cff"; ACCENT2="#00d0a3"; DANGER="#ff5c72"
-ADMIN_PIN = "1234"
+BG = "#0f1117"
+CARD = "#1a1d29"
+CARD_LINE = "#2a2e3d"
+TEXT = "#e6e8ef"
+SUBTEXT = "#8b90a3"
+ACCENT = "#5b8cff"
+ACCENT2 = "#00d0a3"
+DANGER = "#ff5c72"
+ADMIN_PIN = os.environ.get("SIGNBRIDGE_ADMIN_PIN", "1234")
 
 STYLE = f"""
 QMainWindow, QWidget {{ background-color:{BG}; color:{TEXT};
@@ -59,11 +66,13 @@ QPushButton#Ghost:hover {{ border:1px solid {ACCENT}; color:{ACCENT}; }}
 QPushButton#Admin {{ background-color:transparent; color:{SUBTEXT}; border:1px solid {CARD_LINE}; padding:6px 14px; font-size:12px; }}
 QPushButton#Admin:hover {{ border:1px solid {ACCENT}; color:{ACCENT}; }}
 QStatusBar {{ background-color:{CARD}; color:{SUBTEXT}; border-top:1px solid {CARD_LINE}; font-size:12px; }}
+QCheckBox {{ color:{TEXT}; font-size:13px; spacing:6px; }}
 """
 
 
 def make_card():
-    card = QFrame(); card.setObjectName("Card")
+    card = QFrame()
+    card.setObjectName("Card")
     card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     return card
 
@@ -81,16 +90,20 @@ def np_to_qpix(img_bgr, target_w=None):
 class SignLSTM(nn.Module):
     def __init__(self, in_dim, hidden, n_cls, num_layers=2, dropout=0.3):
         super().__init__()
-        self.lstm = nn.LSTM(in_dim, hidden, num_layers=num_layers,
-                            batch_first=True,
-                            dropout=dropout if num_layers > 1 else 0.0)
+        self.lstm = nn.LSTM(
+            in_dim, hidden, num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+        )
         self.fc = nn.Sequential(
             nn.Linear(hidden, 64), nn.ReLU(), nn.Dropout(dropout),
-            nn.Linear(64, n_cls))
+            nn.Linear(64, n_cls),
+        )
 
     def forward(self, x, lengths):
-        packed = pack_padded_sequence(x, lengths.cpu(),
-                                      batch_first=True, enforce_sorted=False)
+        packed = pack_padded_sequence(
+            x, lengths.cpu(), batch_first=True, enforce_sorted=False
+        )
         _, (h_n, _) = self.lstm(packed)
         return self.fc(h_n[-1])
 
@@ -121,9 +134,10 @@ class RecognitionThread(QThread):
         ckpt = torch.load(CKPT_PATH, map_location=self.device)
         self.seq_len = ckpt["seq_len"]
         self.idx2label = {int(k): v for k, v in ckpt["idx2label"].items()}
-        self.model = SignLSTM(ckpt["in_dim"], ckpt["hidden"], ckpt["n_classes"],
-                              num_layers=ckpt["num_layers"], dropout=ckpt["dropout"]
-                              ).to(self.device)
+        self.model = SignLSTM(
+            ckpt["in_dim"], ckpt["hidden"], ckpt["n_classes"],
+            num_layers=ckpt["num_layers"], dropout=ckpt["dropout"],
+        ).to(self.device)
         self.model.load_state_dict(ckpt["model_state"])
         self.model.eval()
         return True
@@ -135,9 +149,11 @@ class RecognitionThread(QThread):
         T = arr.shape[0]
         if T < self.seq_len:
             pad = np.zeros((self.seq_len - T, FEATURE_DIM), dtype=np.float32)
-            arr = np.concatenate([arr, pad], axis=0); length = T
+            arr = np.concatenate([arr, pad], axis=0)
+            length = T
         else:
-            arr = arr[-self.seq_len:]; length = self.seq_len
+            arr = arr[-self.seq_len:]
+            length = self.seq_len
         x = torch.tensor(arr[None, ...], dtype=torch.float32, device=self.device)
         lengths = torch.tensor([length], dtype=torch.long)
         with torch.no_grad():
@@ -164,9 +180,11 @@ class RecognitionThread(QThread):
         is_moving = False
         still_count = 0
 
-        with mp_holistic.Holistic(min_detection_confidence=0.5,
-                                  min_tracking_confidence=0.5,
-                                  model_complexity=1) as holistic:
+        with mp_holistic.Holistic(
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            model_complexity=1,
+        ) as holistic:
             while self._running:
                 ok, frame = cap.read()
                 if not ok:
@@ -225,8 +243,10 @@ class RecognitionThread(QThread):
 
                 disp = cv2.flip(frame, 1)
                 if rec_text:
-                    cv2.putText(disp, rec_text, (10, 30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    cv2.putText(
+                        disp, rec_text, (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2,
+                    )
                 self.frame_ready.emit(disp)
                 self.msleep(15)
         cap.release()
@@ -234,6 +254,58 @@ class RecognitionThread(QThread):
     def stop(self):
         self._running = False
         self.wait(1500)
+
+
+class SpeakThread(QThread):
+    def __init__(self, tts, text, parent=None):
+        super().__init__(parent)
+        self.tts = tts
+        self.text = text
+
+    def run(self):
+        try:
+            self.tts.speak(self.text)
+        except Exception as ex:
+            print(f"[TTS] {ex}")
+
+
+class UeStreamThread(QThread):
+    status = Signal(str)
+
+    def __init__(self, bridge: UeBridge, gloss: list[str], parent=None):
+        super().__init__(parent)
+        self.bridge = bridge
+        self.gloss = gloss
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        sent = False
+        for word in self.gloss:
+            if self._stop:
+                return
+            ue, bones, label = try_load_3d_clip(word)
+            if ue is None:
+                continue
+            sent = True
+            self.status.emit(f"UE 재생  ·  {label or word}")
+            stream_clip(
+                self.bridge, ue, bones, label or word,
+                stop_flag=lambda: self._stop,
+            )
+            time.sleep(0.15)
+        if not sent and not self._stop:
+            ue, bones, label = try_load_3d_clip(None)
+            if ue is not None:
+                self.status.emit(f"UE 테스트 클립  ·  {label}")
+                stream_clip(
+                    self.bridge, ue, bones, label or "clip",
+                    stop_flag=lambda: self._stop,
+                )
+            else:
+                self.status.emit("UE play 명령만 전송 (3D 클립 없음)")
 
 
 class SignBridgeGUI(QMainWindow):
@@ -245,6 +317,7 @@ class SignBridgeGUI(QMainWindow):
 
         self.reco = None
         self.sentence_words = []
+        self.speak_thread = None
         try:
             self.tts = make_tts("offline")
         except Exception:
@@ -262,29 +335,44 @@ class SignBridgeGUI(QMainWindow):
         self.gloss_llm = None
         self._load_avatar_data()
 
-        root = QWidget(); self.setCentralWidget(root)
+        self.ue = UeBridge()
+        self.ue_thread = None
+        self.use_ue = True
+        self.admin_window = None
+
+        root = QWidget()
+        self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(24, 20, 24, 12); outer.setSpacing(16)
+        outer.setContentsMargins(24, 20, 24, 12)
+        outer.setSpacing(16)
 
         header = QHBoxLayout()
-        ht = QVBoxLayout(); ht.setSpacing(2)
-        title = QLabel("SignBridge"); title.setObjectName("Title")
+        ht = QVBoxLayout()
+        ht.setSpacing(2)
+        title = QLabel("SignBridge")
+        title.setObjectName("Title")
         sub = QLabel("실시간 양방향 한국수어 소통 시스템  ·  병원 · 은행 창구 데모")
         sub.setObjectName("Subtitle")
-        ht.addWidget(title); ht.addWidget(sub)
-        header.addLayout(ht); header.addStretch()
-        admin_btn = QPushButton("⚙  관리자"); admin_btn.setObjectName("Admin")
+        ht.addWidget(title)
+        ht.addWidget(sub)
+        header.addLayout(ht)
+        header.addStretch()
+        admin_btn = QPushButton("⚙  관리자")
+        admin_btn.setObjectName("Admin")
         admin_btn.clicked.connect(self.open_admin)
         header.addWidget(admin_btn, alignment=Qt.AlignTop)
         outer.addLayout(header)
 
-        panels = QHBoxLayout(); panels.setSpacing(16)
+        panels = QHBoxLayout()
+        panels.setSpacing(16)
         panels.addWidget(self._build_panel_a())
         panels.addWidget(self._build_panel_b())
         outer.addLayout(panels, stretch=1)
 
-        self.status = QStatusBar(); self.setStatusBar(self.status)
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
         self.status.showMessage("준비 완료  ·  대기 중")
+        QTimer.singleShot(300, self._refresh_ue_status)
 
     def _load_avatar_data(self):
         try:
@@ -297,6 +385,48 @@ class SignBridgeGUI(QMainWindow):
                 self.gloss_llm = GlossLLM()
         except Exception as ex:
             print(f"[아바타 데이터 로드 실패] {ex}")
+
+    def _speak(self, text):
+        if self.tts is None or not text:
+            return
+        if self.speak_thread is not None and self.speak_thread.isRunning():
+            return
+        self.speak_thread = SpeakThread(self.tts, text, self)
+        self.speak_thread.start()
+
+    def _refresh_ue_status(self):
+        alive = self.ue.ping()
+        if not hasattr(self, "ue_badge"):
+            return
+        if alive:
+            self.ue_badge.setText("UE  :7755")
+            self.ue_badge.setStyleSheet(
+                "background:#00d0a3; color:#07241c; border-radius:10px; "
+                "padding:3px 10px; font-size:12px; font-weight:700;"
+            )
+            self.status.showMessage("UE 브리지 준비  ·  127.0.0.1:7755")
+        else:
+            self.ue_badge.setText("UE  미연결")
+            self.ue_badge.setStyleSheet(
+                "background:#3a2430; color:#ff5c72; border-radius:10px; "
+                "padding:3px 10px; font-size:12px; font-weight:700;"
+            )
+
+    def _toggle_ue(self, state):
+        self.use_ue = bool(state)
+        self.status.showMessage("UE 아바타로 보내기" if self.use_ue else "2D 미리보기만")
+
+    def _stop_ue_play(self):
+        if self.ue_thread is not None:
+            self.ue_thread.stop()
+            self.ue_thread.wait(800)
+            self.ue_thread = None
+
+    def _start_ue_stream(self, gloss):
+        self._stop_ue_play()
+        self.ue_thread = UeStreamThread(self.ue, gloss, self)
+        self.ue_thread.status.connect(self.status.showMessage)
+        self.ue_thread.start()
 
     # ══════ A방향 ══════
     def toggle_camera(self):
@@ -339,8 +469,10 @@ class SignBridgeGUI(QMainWindow):
 
     def _on_word(self, label, conf):
         self.sentence_words.append(label)
-        self.result_a.setText("단어:  " + " + ".join(self.sentence_words)
-                              + f"   (최근 {label} {conf*100:.0f}%)")
+        self.result_a.setText(
+            "단어:  " + " + ".join(self.sentence_words)
+            + f"   (최근 {label} {conf * 100:.0f}%)"
+        )
 
     def _finish_sentence(self):
         if not self.sentence_words:
@@ -348,8 +480,7 @@ class SignBridgeGUI(QMainWindow):
             return
         sentence = build_sentence(self.sentence_words, llm=self.sentence_llm)
         self.result_a.setText(sentence)
-        if self.tts is not None:
-            self.tts.speak(sentence)
+        self._speak(sentence)
         self.status.showMessage(f"문장 완성  ·  {sentence}")
         self.sentence_words = []
 
@@ -363,25 +494,39 @@ class SignBridgeGUI(QMainWindow):
         if not text:
             self.status.showMessage("문장을 입력하세요")
             return
-        if self.bank is None:
-            QMessageBox.warning(self, "데이터 없음",
-                "dataset_all/X_all.npy 가 없습니다. 먼저 데이터를 만들어주세요.")
-            return
-        gloss = text_to_gloss(text, self.available_words, llm=self.gloss_llm)
+
+        gloss = []
+        if self.available_words:
+            gloss = text_to_gloss(text, self.available_words, llm=self.gloss_llm)
         if not gloss:
-            self.status.showMessage("보유 단어로 표현 가능한 글로스가 없습니다")
-            self.result_b.setText("(표현 가능한 단어 없음)")
-            return
+            gloss = [w for w in text.replace(".", " ").split() if w]
+
         self.result_b.setText("글로스:  " + "  →  ".join(gloss))
-        self.anim_frames = build_full_sequence(gloss, self.bank, self.neutral)
-        self.anim_idx = 0
-        self.anim_timer.start(int(1000 / FPS))
-        self.status.showMessage(f"아바타 재생 중  ·  {len(self.anim_frames)} 프레임")
+        self.ue.caption(text, gloss)
+
+        if self.use_ue:
+            self.ue.play(gloss, korean=text)
+            self._start_ue_stream(gloss)
+
+        if self.bank is not None and self.neutral is not None:
+            self.anim_frames = build_full_sequence(gloss, self.bank, self.neutral)
+            self.anim_idx = 0
+            self.anim_timer.start(int(1000 / FPS))
+            self.avatar_b.setText("")
+            self.status.showMessage(f"재생  ·  {' + '.join(gloss)}")
+        else:
+            self.anim_timer.stop()
+            self.avatar_b.setText(
+                "UE로 재생 명령을 보냈습니다.\n"
+                "에디터 Play 후 점 / 아바타를 확인하세요.\n\n"
+                + " → ".join(gloss)
+            )
+            self.status.showMessage(f"UE 송신  ·  {' + '.join(gloss)}")
 
     def _next_avatar_frame(self):
         if self.anim_idx >= len(self.anim_frames):
             self.anim_timer.stop()
-            self.status.showMessage("아바타 재생 완료")
+            self.status.showMessage("2D 미리보기 완료")
             return
         img = draw_frame(self.anim_frames[self.anim_idx])
         w = self.avatar_b.width() - 8
@@ -389,38 +534,51 @@ class SignBridgeGUI(QMainWindow):
         self.anim_idx += 1
 
     def open_admin(self):
-        if ADMIN_PIN is not None:
-            pin, ok = QInputDialog.getText(self, "관리자 인증", "PIN 을 입력하세요:", QLineEdit.Password)
+        if ADMIN_PIN:
+            pin, ok = QInputDialog.getText(
+                self, "관리자 인증", "PIN 을 입력하세요:", QLineEdit.Password
+            )
             if not ok:
                 return
             if pin != ADMIN_PIN:
                 QMessageBox.warning(self, "인증 실패", "PIN 이 올바르지 않습니다.")
                 return
         from admin_console import AdminConsole
-        if not hasattr(self, "admin_window") or self.admin_window is None:
+        if self.admin_window is None:
             self.admin_window = AdminConsole(self, BASE_DIR)
         self.admin_window.show()
-        self.admin_window.raise_(); self.admin_window.activateWindow()
+        self.admin_window.raise_()
+        self.admin_window.activateWindow()
 
     def _build_panel_a(self):
-        card = make_card(); lay = QVBoxLayout(card)
-        lay.setContentsMargins(20, 18, 20, 18); lay.setSpacing(14)
+        card = make_card()
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(20, 18, 20, 18)
+        lay.setSpacing(14)
         head = QHBoxLayout()
-        h = QLabel("수어 → 텍스트 · 음성"); h.setObjectName("PanelHeader")
-        badge = QLabel("A"); badge.setObjectName("PanelBadge")
-        head.addWidget(h); head.addStretch(); head.addWidget(badge)
+        h = QLabel("수어 → 텍스트 · 음성")
+        h.setObjectName("PanelHeader")
+        badge = QLabel("A")
+        badge.setObjectName("PanelBadge")
+        head.addWidget(h)
+        head.addStretch()
+        head.addWidget(badge)
         lay.addLayout(head)
+
         self.video_a = QLabel("📷  카메라 대기 중")
         self.video_a.setObjectName("VideoArea")
         self.video_a.setAlignment(Qt.AlignCenter)
         self.video_a.setMinimumHeight(300)
         lay.addWidget(self.video_a, stretch=1)
+
         self.result_a = QLabel("인식된 문장이 여기에 표시됩니다.")
-        self.result_a.setObjectName("ResultBox"); self.result_a.setWordWrap(True)
+        self.result_a.setObjectName("ResultBox")
+        self.result_a.setWordWrap(True)
         self.result_a.setMinimumHeight(70)
         lay.addWidget(self.result_a)
 
-        btns = QHBoxLayout(); btns.setSpacing(10)
+        btns = QHBoxLayout()
+        btns.setSpacing(10)
         self.btn_cam = QPushButton("▶  인식 시작")
         self.btn_cam.clicked.connect(self.toggle_camera)
         self.btn_capture = QPushButton("📸  단어 캡처")
@@ -432,7 +590,6 @@ class SignBridgeGUI(QMainWindow):
         self.btn_done.clicked.connect(self._finish_sentence)
         self.btn_done.setEnabled(False)
         self.chk_auto = QCheckBox("연속 자동")
-        self.chk_auto.setStyleSheet(f"color:{TEXT}; font-size:13px;")
         self.chk_auto.stateChanged.connect(self._toggle_auto)
         btns.addWidget(self.btn_cam)
         btns.addWidget(self.btn_capture)
@@ -443,38 +600,67 @@ class SignBridgeGUI(QMainWindow):
         return card
 
     def _build_panel_b(self):
-        card = make_card(); lay = QVBoxLayout(card)
-        lay.setContentsMargins(20, 18, 20, 18); lay.setSpacing(14)
+        card = make_card()
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(20, 18, 20, 18)
+        lay.setSpacing(14)
+
         head = QHBoxLayout()
-        h = QLabel("텍스트 → 수어 아바타"); h.setObjectName("PanelHeader")
-        badge = QLabel("B"); badge.setObjectName("PanelBadgeB")
-        head.addWidget(h); head.addStretch(); head.addWidget(badge)
+        h = QLabel("텍스트 → 수어 아바타")
+        h.setObjectName("PanelHeader")
+        badge = QLabel("B")
+        badge.setObjectName("PanelBadgeB")
+        self.ue_badge = QLabel("UE  확인 중")
+        self.ue_badge.setObjectName("PanelBadge")
+        self.chk_ue = QCheckBox("UE로 보내기")
+        self.chk_ue.setChecked(True)
+        self.chk_ue.stateChanged.connect(self._toggle_ue)
+        head.addWidget(h)
+        head.addStretch()
+        head.addWidget(self.chk_ue)
+        head.addWidget(self.ue_badge)
+        head.addWidget(badge)
         lay.addLayout(head)
-        self.avatar_b = QLabel("🧑  아바타 대기 중")
+
+        self.avatar_b = QLabel("🧑  2D 미리보기  ·  UE 아바타 대기")
         self.avatar_b.setObjectName("VideoArea")
         self.avatar_b.setAlignment(Qt.AlignCenter)
         self.avatar_b.setMinimumHeight(300)
         lay.addWidget(self.avatar_b, stretch=1)
+
         self.result_b = QLabel("글로스가 여기에 표시됩니다.")
-        self.result_b.setObjectName("ResultBox"); self.result_b.setWordWrap(True)
+        self.result_b.setObjectName("ResultBox")
+        self.result_b.setWordWrap(True)
         self.result_b.setMinimumHeight(50)
         lay.addWidget(self.result_b)
+
         self.input_b = QLineEdit()
         self.input_b.setPlaceholderText("변환할 한국어 문장을 입력하세요 (예: 머리가 아파요)")
         self.input_b.returnPressed.connect(self.play_text_to_sign)
         lay.addWidget(self.input_b)
-        btns = QHBoxLayout(); btns.setSpacing(10)
+
+        btns = QHBoxLayout()
+        btns.setSpacing(10)
         play = QPushButton("▶  수어로 변환")
         play.clicked.connect(self.play_text_to_sign)
-        clear = QPushButton("지우기"); clear.setObjectName("Ghost")
-        clear.clicked.connect(lambda: self.input_b.clear())
-        btns.addWidget(play); btns.addWidget(clear); btns.addStretch()
+        clear = QPushButton("지우기")
+        clear.setObjectName("Ghost")
+        clear.clicked.connect(self.input_b.clear)
+        btns.addWidget(play)
+        btns.addWidget(clear)
+        btns.addStretch()
         lay.addLayout(btns)
         return card
 
     def closeEvent(self, event):
+        self.anim_timer.stop()
+        self._stop_ue_play()
         if self.reco is not None:
             self.reco.stop()
+            self.reco = None
+        if self.speak_thread is not None:
+            self.speak_thread.wait(500)
+        self.ue.close()
         super().closeEvent(event)
 
 

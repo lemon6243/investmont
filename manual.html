@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>SignBridge — 언리얼 수어 모캡 데이터 수집 매뉴얼 v1.0</title>
+<style>
+    @page { size: A4; margin: 10mm; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Malgun Gothic','맑은 고딕',sans-serif; color:#1e1e1e;
+        line-height:1.5; font-size:9pt; background:#eceff1; }
+    .page { width:210mm; min-height:297mm; padding:12mm 12mm; margin:8px auto;
+        background:#fff; box-shadow:0 0 8px rgba(0,0,0,0.15); page-break-after:always; }
+    .page:last-child { page-break-after:auto; }
+    .head { display:flex; justify-content:space-between; align-items:flex-end;
+        border-bottom:3px solid #1565c0; padding-bottom:6px; margin-bottom:12px; }
+    .head h1 { font-size:15pt; color:#0d3c78; }
+    .head .sub { font-size:7.8pt; color:#777; text-align:right; }
+    .tag { display:inline-block; background:#1565c0; color:#fff; font-size:7pt;
+        padding:2px 8px; border-radius:9px; }
+    h2 { font-size:11pt; color:#0d3c78; margin:15px 0 7px;
+        border-left:4px solid #1565c0; padding-left:8px; }
+    h3 { font-size:9.5pt; color:#0d3c78; margin:10px 0 4px; }
+    p { margin-bottom:6px; }
+    .intro { background:#e9f2fb; border-left:4px solid #1565c0; padding:9px 12px;
+        margin-bottom:10px; font-size:8.6pt; }
+    .step { background:#f7f9fc; border:1px solid #d0dceb; border-radius:6px;
+        padding:9px 12px; margin:8px 0; }
+    .step .num { display:inline-block; background:#1565c0; color:#fff; font-weight:bold;
+        width:20px; height:20px; border-radius:50%; text-align:center; line-height:20px;
+        font-size:8pt; margin-right:6px; }
+    .step .title { font-weight:bold; color:#0d3c78; font-size:9.3pt; }
+    ul,ol { margin:5px 0 5px 20px; } li { margin-bottom:4px; }
+    .warn { background:#fdecec; border-left:4px solid #c0392b; padding:8px 12px;
+        margin:7px 0; font-size:8.4pt; } .warn b { color:#c0392b; }
+    .tip { background:#e8f5e9; border-left:4px solid #2e7d32; padding:8px 12px;
+        margin:7px 0; font-size:8.4pt; } .tip b { color:#2e7d32; }
+    .note { background:#fff8e6; border-left:4px solid #b8860b; padding:8px 12px;
+        margin:7px 0; font-size:8.4pt; } .note b { color:#8a6d00; }
+    table { width:100%; border-collapse:collapse; margin:6px 0; }
+    th,td { border:1px solid #b6c2cc; padding:5px 8px; text-align:left; vertical-align:top; font-size:8.3pt; }
+    th { background:#0d3c78; color:#fff; }
+    tr:nth-child(even) td { background:#f2f6fb; }
+    code { background:#eef2f7; padding:1px 5px; border-radius:3px; font-family:'Consolas',monospace; font-size:8.2pt; }
+    .kbd { background:#333; color:#fff; padding:1px 6px; border-radius:4px; font-size:8pt; font-family:'Consolas',monospace; }
+    .foot { margin-top:12px; font-size:7pt; color:#999; border-top:1px solid #ddd; padding-top:6px; }
+    @media print {
+        body { background:#fff; }
+        .page { width:100%; min-height:auto; margin:0; padding:9mm 10mm; box-shadow:none; }
+        * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+        .step,.warn,.tip,.note { page-break-inside:avoid; }
+    }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+    <div class="head">
+        <div><span class="tag">동료용 실전 매뉴얼</span>
+            <h1>언리얼 수어 모캡 데이터 수집 가이드</h1></div>
+        <div class="sub">SignBridge · Unreal Engine 5.8 MetaHuman Animator<br>v1.0 · 회전 애니메이션(AS_MHP) 추출 workflow</div>
+    </div>
+
+    <div class="intro">
+        <b>이 문서가 하는 일:</b> 실제 수어 영상 한 개를 → 언리얼 MetaHuman Animator로 처리해 →
+        <b>손가락 회전까지 포함된 애니메이션 파일(AS_MHP_...)</b>을 만들어 저장하기까지의 전 과정.
+        각자 단어를 나눠 맡아 병렬로 데이터를 늘리는 것이 목표. <b>결과물 = 단어별 회전 애니메이션 애셋.</b>
+    </div>
+
+    <div class="warn">
+        <b>⚠ 시작 전 반드시 읽기 — 하드웨어 & 저작권</b>
+        <ul>
+            <li><b>GPU:</b> MetaHuman Animator의 처리(Process)는 NVIDIA(CUDA)에 최적화됨. <b>AMD 라데온은 매우 느리거나 실패할 수 있음</b> → 먼저 짧은 단어 1개로 "처리가 끝까지 되는지" 테스트할 것.</li>
+            <li><b>메모리:</b> VRAM 8GB는 빠듯함. 작업 중 <b>브라우저·다른 프로그램·Live Link Hub 전부 닫기</b>. 메모리 부족 경고가 뜨면 Cancel 후 프로그램 정리.</li>
+            <li><b>저작권:</b> 유튜브 등 <b>타인 영상은 기술 테스트용으로만</b>. 데모·제품에 넣을 단어는 <b>직접 촬영했거나 사용 권리를 확보한 영상만</b> 사용.</li>
+        </ul>
+    </div>
+
+    <h2>준비물 체크리스트</h2>
+    <table>
+        <tr><th style="width:30%">항목</th><th>내용</th></tr>
+        <tr><td>Unreal Engine</td><td>5.8 (프로젝트: signbrg 또는 팀 공유 프로젝트)</td></tr>
+        <tr><td>필수 플러그인</td><td>MetaHuman, MetaHuman Animator (Edit → Plugins에서 활성 확인 후 재시작)</td></tr>
+        <tr><td>소스 영상</td><td>수어 단어 1개당 영상 1개. <b>정면·상반신 잘 보임·손 안 겹침·밝은 조명·mp4/mov</b> 권장</td></tr>
+        <tr><td>저장 폴더</td><td>Content Browser 안 <code>signdemo</code> 폴더 (없으면 생성)</td></tr>
+        <tr><td>단어 목록</td><td>맡은 단어와 파일명 규칙(예: <code>WORD1501</code>) 팀과 사전 합의</td></tr>
+    </table>
+
+    <div class="note">
+        <b>좋은 소스 영상 고르는 법:</b> ①얼굴과 두 손이 항상 화면 안에 있을 것 ②손이 몸통·얼굴에 심하게 겹치지 않을 것
+        ③배경이 단순하고 밝을 것 ④화질이 선명할 것(압축 심한 저화질은 손가락이 뭉개짐). <b>화면의 자막·글자는 사람이 아니므로 추적에 영향 없음.</b>
+    </div>
+
+    <h2>전체 흐름 (5단계)</h2>
+    <table>
+        <tr><th style="width:8%">단계</th><th style="width:34%">작업</th><th>결과물</th></tr>
+        <tr><td>1</td><td>영상 Ingest (가져오기)</td><td>Footage Capture Data</td></tr>
+        <tr><td>2</td><td>MetaHuman Performance 애셋 생성</td><td>MHP_단어 애셋</td></tr>
+        <tr><td>3</td><td>Process (솔브/처리)</td><td>추적된 모션</td></tr>
+        <tr><td>4</td><td>Export Animation (내보내기)</td><td><b>AS_MHP_단어_Body</b> (회전 애니메이션)</td></tr>
+        <tr><td>5</td><td>검수 & 저장·공유</td><td>검증된 애셋 → 팀 공유</td></tr>
+    </table>
+
+    <div class="foot">SignBridge 언리얼 모캡 매뉴얼 v1.0 · 1/2 · 하드웨어·저작권 주의 필수</div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+    <div class="head">
+        <div><span class="tag">동료용 실전 매뉴얼</span>
+            <h1 style="font-size:13pt;">언리얼 수어 모캡 가이드 (2/2)</h1></div>
+        <div class="sub">단계별 상세 절차 · 자주 막히는 지점 해결법</div>
+    </div>
+
+    <h2>단계별 상세 절차</h2>
+
+    <div class="step">
+        <span class="num">1</span><span class="title">영상 Ingest — 소스 영상 가져오기</span>
+        <ul>
+            <li>Content Browser에서 <code>signdemo</code> 폴더로 이동.</li>
+            <li>우클릭 → <b>MetaHuman → Capture Data (Footage)</b> 생성, 또는 상단 <b>Capture Manager</b>로 영상 파일을 Ingest.</li>
+            <li>수어 영상 파일(mp4 등)을 지정 → 처리가 끝나면 <b>Footage Capture Data</b> 애셋이 생성됨.</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <span class="num">2</span><span class="title">MetaHuman Performance 애셋 생성</span>
+        <ul>
+            <li><code>signdemo</code>에서 우클릭 → <b>MetaHuman → MetaHuman Performance</b> 생성. 이름 예: <code>MHP_WORD1501_Body</code>.</li>
+            <li>더블클릭해서 열고, Details 패널에서 <b>Footage Capture Data</b>에 1단계 애셋을 지정.</li>
+            <li>Processing Parameters에서 트래킹 종류 설정:
+                <ul>
+                    <li><b>Face + Body(권장):</b> Facial·Body Tracking 둘 다 켜기. Face Detector·Face Solver는 <b>Small 변형</b> 선택(안 보이면 Show Engine Content 켜기).</li>
+                    <li>손·팔 위주라면 Body Tracking 중심, Head Movement 필요시 켜기.</li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <span class="num">3</span><span class="title">Process — 처리(솔브)</span>
+        <ul>
+            <li>타임라인에서 필요한 구간만 남기고 앞뒤를 트림.</li>
+            <li><b>Process</b> 버튼 클릭 → 프레임별로 몸·손·얼굴을 추적. <b>시간이 걸림</b>(특히 AMD GPU는 매우 느림).</li>
+            <li>완료되면 프리뷰에서 뼈대/메시가 영상처럼 움직이는지 확인.</li>
+        </ul>
+        <div class="warn"><b>⚠ AMD(RX 6600) 첫 테스트:</b> 여기서 무한 대기·에러·비정상 종료가 나면, 이 PC로는 Process가 어렵다는 뜻.
+            그 경우 <b>모캡은 NVIDIA PC가 전담</b>하고, AMD PC는 영상 준비·검수·MP4 변환·코드 작업을 맡는 분업으로 전환.</div>
+    </div>
+
+    <div class="step">
+        <span class="num">4</span><span class="title">Export Animation — 회전 애니메이션 내보내기</span>
+        <ul>
+            <li><b>Export Animation</b> 클릭 → 이름·저장 위치 지정(<code>signdemo</code>).</li>
+            <li>옵션은 기본값 유지: Face/Body Export 체크, Enable Head Movement, Auto Save, Export Range=Processing Range, Unsolved=Last Valid Frame, Curve=Linear, Remove Redundant Keys.</li>
+            <li><b>Export Skeleton</b>은 <b>Performer Skeleton</b>(기본)으로 두기 → 나중에 MetaHuman(Skye 등)에 적용 가능.</li>
+            <li><b>Generate</b> 클릭. 완료되면 <code>signdemo</code>에 <b>AS_MHP_단어_Body</b>(애니메이션)와 <b>SK_MHP_단어_Body</b>(마네킹 메시)가 생성됨.</li>
+        </ul>
+        <div class="tip"><b>✅ 여기서 나온 AS_MHP_...가 진짜 결과물</b> — 이 안에 뼈 회전값(손가락 포함)이 들어있음. 이게 우리가 원하던 "회전 데이터".</div>
+    </div>
+
+    <div class="step">
+        <span class="num">5</span><span class="title">검수 & 저장·공유</span>
+        <ul>
+            <li>AS_MHP_... 더블클릭 → 재생(space)해서 동작 확인. <b>특히 손가락이 원본 영상처럼 자연스러운지</b> 집중 확인.</li>
+            <li>이상하면(손 뒤틀림·프레임 튐) 원본 영상 품질 문제일 가능성 → 더 좋은 소스로 재시도.</li>
+            <li>정상이면 팀 공유 위치(공유 드라이브/깃 LFS 등 팀 합의)로 <b>AS_MHP_단어</b>와 <b>SK_MHP_단어</b>를 함께 전달.</li>
+            <li>작업 기록: <b>단어명 · 원본 출처 · 품질(상/중/하) · 손가락 정상 여부</b>를 공유 시트에 남기기.</li>
+        </ul>
+    </div>
+
+    <h2>자주 막히는 지점 (사용자 실경험 기반)</h2>
+    <table>
+        <tr><th style="width:38%">증상</th><th>해결</th></tr>
+        <tr><td>메모리 부족 경고 (10GB 필요, 가용 부족)</td><td>Cancel → 브라우저·Live Link Hub·타 프로그램 종료 후 재시도. 고품질 MetaHuman은 후순위로.</td></tr>
+        <tr><td>캐릭터/메시를 뷰포트로 드래그하면 <b>빨간 금지 아이콘</b></td><td>MetaHuman은 뷰포트 직접 드롭 불가. <b>애니메이션(AS_MHP)은 Sequencer에 드롭 가능</b> — 캐릭터가 필요하면 레벨 시퀀스 경유.</td></tr>
+        <tr><td>재생하면 배경 검고 뼈대만 보임</td><td>메시가 없는 추출용 상태일 수 있음. 검수는 AS_MHP 애셋 자체를 열어 재생하면 됨.</td></tr>
+        <tr><td>Play 눌렀더니 종료 안 됨(PIE 상태)</td><td><span class="kbd">Esc</span> 또는 정지(■) 눌러 재생 모드 종료 후 재시도.</td></tr>
+        <tr><td>Face Detector/Solver가 목록에 없음</td><td>Content Browser 설정에서 <b>Show Engine Content</b> 켜기.</td></tr>
+        <tr><td>손가락이 바닥에 떨어지거나 뒤틀림</td><td>원본 영상에서 손이 겹치거나 화면 밖으로 나감 → 손이 잘 보이는 다른 영상으로 교체.</td></tr>
+    </table>
+
+    <div class="note">
+        <b>파일명 규칙(팀 합의 예시):</b> 애니메이션 <code>AS_MHP_&lt;단어ID&gt;_Body</code> · 메시 <code>SK_MHP_&lt;단어ID&gt;_Body</code> ·
+        퍼포먼스 <code>MHP_&lt;단어ID&gt;_Body</code>. 단어ID는 팀에서 정한 표(한글단어↔ID) 기준으로 통일.
+    </div>
+
+    <div class="tip">
+        <b>✅ 분업 제안:</b> NVIDIA PC = 모캡(Process/Export) 집중 / AMD PC = 소스 영상 선별·구간 컷·검수·MP4 렌더·GUI 코드.
+        이렇게 나누면 서로 기다리지 않고 병렬 진행 가능.
+    </div>
+
+    <div class="foot">
+        SignBridge 언리얼 모캡 매뉴얼 v1.0 · 2/2 · 막히면 화면 캡처해서 팀에 공유 후 함께 해결
+    </div>
+</div>
+
+</body>
+</html>
