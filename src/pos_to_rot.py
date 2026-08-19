@@ -122,6 +122,27 @@ def build_rest_pose(seq):
             return f.copy()
     return seq[0].copy()
 
+# 언리얼 좌표계(x 앞, y 오른쪽, z 위) 기준 T포즈 본 방향.
+# send_mh_live.py가 seq_to_ue로 이미 언리얼 좌표로 바꿔서 넘기므로
+# rest를 언리얼 T포즈로 정의하면 계산된 회전이 뼈 0도(T포즈)에 맞는다.
+TPOSE_DIR = {
+    "head":       np.array([0, 0, 1], np.float32),    # 목->코: 위
+    "clavicle_r": np.array([0, 1, 0], np.float32),    # 목->오른어깨: 오른쪽(+Y)
+    "upperarm_r": np.array([0, 1, 0], np.float32),    # 오른팔: 오른쪽
+    "lowerarm_r": np.array([0, 1, 0], np.float32),
+    "hand_r":     np.array([0, 1, 0], np.float32),
+    "clavicle_l": np.array([0, -1, 0], np.float32),   # 목->왼어깨: 왼쪽(-Y)
+    "upperarm_l": np.array([0, -1, 0], np.float32),   # 왼팔: 왼쪽
+    "lowerarm_l": np.array([0, -1, 0], np.float32),
+    "hand_l":     np.array([0, -1, 0], np.float32),
+}
+
+# 손가락: T포즈에서 손가락은 팔과 같은 방향(바깥쪽)으로 뻗어 있다고 가정.
+# 오른손 손가락은 +Y, 왼손 손가락은 -Y.
+for _a, _b, _name in HAND_CHAINS:
+    TPOSE_DIR[f"{_name}_r"] = np.array([0, 1, 0], np.float32)
+    TPOSE_DIR[f"{_name}_l"] = np.array([0, -1, 0], np.float32)
+
 
 def positions_to_local_quats(seq):
     """
@@ -138,10 +159,17 @@ def positions_to_local_quats(seq):
     rsh, lsh = J["r_shoulder"], J["l_shoulder"]
 
     # rest 본 방향 (월드)
+        # rest 본 방향: 클립 첫 프레임이 아니라 고정 T포즈를 기준으로 사용.
+    # (이래야 모든 클립이 언리얼 T포즈와 같은 기준을 갖고,
+    #  팔이 엉뚱하게 돌지 않는다.)
     rest_dir = {}
     for parent, child, name in BONES:
-        d = rest[J[child]] - rest[J[parent]]
-        rest_dir[name] = d
+        if name in TPOSE_DIR:
+            rest_dir[name] = TPOSE_DIR[name].copy()
+        else:
+            # 정의 안 된 본은 안전하게 첫 프레임 방향 사용
+            rest_dir[name] = rest[J[child]] - rest[J[parent]]
+
 
     for t in range(T):
         kp = seq[t]

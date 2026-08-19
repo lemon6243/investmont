@@ -149,14 +149,19 @@ def load_sentence_sequence(video_dir, start_sec, end_sec):
 
     kp_list, conf_list = [], []
     for fp in files[s:e]:
-        with open(fp, "r", encoding="utf-8") as f:
-            d = json.load(f)
+        try:
+            with open(fp, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            # 깨졌거나 잘린 프레임 파일은 건너뜀
+            continue
         people = d.get("people")
         if people is None:
             continue
         kp, conf = openpose_to_common_3d(people)
         kp_list.append(kp)
         conf_list.append(conf)
+
 
     if not kp_list:
         return None, None

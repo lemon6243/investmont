@@ -36,8 +36,8 @@ from load_dataset_sen import (
 # 설정 — WORD 경로/폴더와 절대 같으면 안 됨
 # zip 받은 뒤 실제 폴더 이름에 맞게 수정
 # ------------------------------------------------------------
-MORPHEME = r"C:\Users\LG\Downloads\수어 영상\1.Training\sen\[라벨]01_real_sen_morpheme"
-KEYPOINT = r"C:\Users\LG\Downloads\수어 영상\1.Training\sen\[라벨]01_real_sen_keypoint"
+MORPHEME = r"D:\sen\수어 영상\1.Training\[라벨]01_real_sen_morpheme\morpheme"
+KEYPOINT = r"D:\sen\수어 영상\1.Training\[라벨]01_real_sen_keypoint"
 
 ANGLES = None                 # None=전 각도, ['F']=정면만
 OUT_DIR = "dataset_sen_3d"    # dataset_all_3d 와 분리

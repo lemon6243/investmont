@@ -158,7 +158,8 @@ def to_unreal(kp, scale=UNREAL_SCALE, recenter=True):
         kp = kp - center
 
     x, y, z = kp[:, 0], kp[:, 1], kp[:, 2]
-    ue = np.stack([z, x, -y], axis=1) * scale
+    ue = np.stack([z, x, y], axis=1) * scale
+
     return ue.astype(np.float32)
 
 
