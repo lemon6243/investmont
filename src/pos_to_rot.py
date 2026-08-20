@@ -223,7 +223,7 @@ for _a, _b, _name in HAND_CHAINS:
 def positions_to_local_quats(seq):
     """
     seq: (T,50,3) 월드 위치 (언리얼 좌표계)
-    return: bones dict -> (T,4) 로컬 xyzw, root (T,3)
+    return: (out 로컬쿼터니언 dict, root (T,3), bone_len dict)
 
     [rest 기준 통일] 모든 본이 '데이터 첫 프레임 = 0도'. 언리얼 Add to Existing.
 
@@ -231,6 +231,9 @@ def positions_to_local_quats(seq):
       1) 부호 정렬: 직전 법선과 내적 음수면 뒤집기.
       2) 각도 게이트: 부호 정렬 후에도 직전과 내적이 THRESH 미만이면
          (= 급격히 흔들린 노이즈 프레임) 이번 법선을 버리고 직전 값 유지.
+
+    [뼈 길이] rest 프레임에서 부모->자식 거리를 재서 bone_len 으로 반환.
+             (FK 미리보기에서 관절 위치 복원에 사용)
     """
     NORMAL_SIM_THRESH = 0.85   # 이보다 급격히 어긋나면 노이즈로 보고 직전 유지
 
@@ -243,9 +246,13 @@ def positions_to_local_quats(seq):
     root = np.zeros((T, 3), np.float32)
     rsh, lsh = J["r_shoulder"], J["l_shoulder"]
 
+    # rest 본 방향 + 뼈 길이 (데이터 첫 유효 프레임 기준)
     rest_dir = {}
+    bone_len = {}
     for parent, child, name in BONES:
-        rest_dir[name] = rest[J[child]] - rest[J[parent]]
+        d = rest[J[child]] - rest[J[parent]]
+        rest_dir[name] = d
+        bone_len[name] = float(np.linalg.norm(d))   # rest에서의 뼈 길이
 
     rest_basis = {}
     rest_normal = {}
@@ -310,9 +317,7 @@ def positions_to_local_quats(seq):
             out[name][t] = q_local
             world_q[child] = q_world
 
-    return out, root
-
-
+    return out, root, bone_len
 
 
 def trim_seq(seq):
@@ -337,7 +342,7 @@ def safe_name(word):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    print(">>> [부호안정화 버전] 실행 중 <<<")
+    print(">>> [뼈길이 저장 버전] 실행 중 <<<")
 
     Xr = np.load(XR_PATH)                          # (N,T,50,3)
     y = np.load(Y_PATH, allow_pickle=True)
@@ -349,10 +354,12 @@ def main():
     catalog = {}
     print(f">> 단어 {len(by_word)}개, 클립 {len(y)}개")
 
+    bone_names = [nm for _, _, nm in BONES]   # 저장 순서 고정
+
     used = {}  # 정리 후 이름 충돌 방지
     for i, (word, clips) in enumerate(sorted(by_word.items()), 1):
         seq = trim_seq(pick_best_clip(clips))
-        bones, root = positions_to_local_quats(seq)
+        bones, root, bone_len = positions_to_local_quats(seq)
 
         name = safe_name(word)
         # 정리 후 이름이 겹치면 뒤에 번호 붙이기
@@ -362,11 +369,15 @@ def main():
         else:
             used[name] = 0
 
+        bone_lens = np.array([bone_len[nm] for nm in bone_names], np.float32)
+
         path = os.path.join(OUT_DIR, f"{name}.npz")
         np.savez_compressed(
             path,
             root=root,
             joint_names=np.array(JOINTS),
+            bone_names=np.array(bone_names),
+            bone_lens=bone_lens,
             **bones,
         )
         catalog[word] = {                 # catalog 키는 원본 라벨 유지
