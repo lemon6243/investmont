@@ -7,6 +7,7 @@
 #   - 언리얼에서는 팔 6개 본을 Add to Existing 으로 설정.
 
 import os
+import re
 import json
 import numpy as np
 from collections import defaultdict
@@ -40,11 +41,11 @@ BONES = [
     ("neck", "r_shoulder", "clavicle_r"),
     ("r_shoulder", "r_elbow", "upperarm_r"),
     ("r_elbow", "r_wrist", "lowerarm_r"),
-    ("r_wrist", "rhand_0", "hand_r"),
+    ("r_wrist", "rhand_9", "hand_r"),
     ("neck", "l_shoulder", "clavicle_l"),
     ("l_shoulder", "l_elbow", "upperarm_l"),
     ("l_elbow", "l_wrist", "lowerarm_l"),
-    ("l_wrist", "lhand_0", "hand_l"),
+    ("l_wrist", "lhand_9", "hand_l"),
 ]
 for a, b, name in HAND_CHAINS:
     BONES.append((f"lhand_{a}", f"lhand_{b}", f"{name}_l"))
@@ -224,11 +225,15 @@ def positions_to_local_quats(seq):
     seq: (T,50,3) 월드 위치 (언리얼 좌표계)
     return: bones dict -> (T,4) 로컬 xyzw, root (T,3)
 
-    [rest 기준 통일]
-      - basis 미적용 본: rest_dir = 데이터 첫 유효 프레임의 본 방향
-      - basis 적용 본:   rest_basis = 데이터 첫 유효 프레임 기준 basis
-      -> 모든 본이 '데이터 첫 프레임 = 0도'. 언리얼은 Add to Existing.
+    [rest 기준 통일] 모든 본이 '데이터 첫 프레임 = 0도'. 언리얼 Add to Existing.
+
+    [손바닥 법선 안정화 - 강화판]
+      1) 부호 정렬: 직전 법선과 내적 음수면 뒤집기.
+      2) 각도 게이트: 부호 정렬 후에도 직전과 내적이 THRESH 미만이면
+         (= 급격히 흔들린 노이즈 프레임) 이번 법선을 버리고 직전 값 유지.
     """
+    NORMAL_SIM_THRESH = 0.85   # 이보다 급격히 어긋나면 노이즈로 보고 직전 유지
+
     rest = build_rest_pose(seq)
     T = seq.shape[0]
     out = {name: np.zeros((T, 4), np.float32) for _, _, name in BONES}
@@ -238,15 +243,12 @@ def positions_to_local_quats(seq):
     root = np.zeros((T, 3), np.float32)
     rsh, lsh = J["r_shoulder"], J["l_shoulder"]
 
-    # rest 본 방향: 데이터 첫 유효 프레임(팔 내린 자세) 기준으로 통일.
-    # (basis 미적용 본에 쓰임. basis 본은 아래 rest_basis 사용.)
     rest_dir = {}
     for parent, child, name in BONES:
         rest_dir[name] = rest[J[child]] - rest[J[parent]]
 
-    # basis 방식 본들의 rest basis 미리 계산
-    # (동일하게 데이터 첫 유효 프레임=rest 자세 기준.)
     rest_basis = {}
+    rest_normal = {}
     for name, hstart in BASIS_BONES.items():
         parent = child = None
         for p, c, nm in BONES:
@@ -256,13 +258,16 @@ def positions_to_local_quats(seq):
         prim = rest[J[child]] - rest[J[parent]]
         sec = palm_normal(rest, hstart)
         rest_basis[name] = make_basis(prim, sec) if sec is not None else None
+        rest_normal[name] = sec
+
+    prev_normal = {name: rest_normal[name] for name in BASIS_BONES}
 
     for t in range(T):
         kp = seq[t]
         if _valid(kp[rsh]) and _valid(kp[lsh]):
             root[t] = (kp[rsh] + kp[lsh]) * 0.5
 
-        world_q = {}  # 조인트 월드 회전
+        world_q = {}
         world_q["neck"] = np.array([0, 0, 0, 1], np.float32)
         world_q["r_wrist"] = np.array([0, 0, 0, 1], np.float32)
         world_q["l_wrist"] = np.array([0, 0, 0, 1], np.float32)
@@ -276,12 +281,23 @@ def positions_to_local_quats(seq):
             if np.linalg.norm(cur) < 1e-6:
                 continue
 
-            # basis 방식 본이면 twist까지 계산, 아니면 방향만
             if name in BASIS_BONES and rest_basis.get(name) is not None:
                 sec = palm_normal(kp, BASIS_BONES[name])
+                if sec is not None:
+                    ref = prev_normal.get(name)
+                    if ref is not None:
+                        # 1) 부호 정렬
+                        if np.dot(sec, ref) < 0:
+                            sec = -sec
+                        # 2) 각도 게이트: 부호 맞춰도 급격히 어긋나면 직전 유지
+                        if np.dot(sec, ref) < NORMAL_SIM_THRESH:
+                            sec = ref
+                    prev_normal[name] = sec
+                else:
+                    # 법선 계산 실패 시에도 직전 값으로 대체
+                    sec = prev_normal.get(name)
                 Rcur = make_basis(cur, sec) if sec is not None else None
                 if Rcur is not None:
-                    # 상대 회전 = Rcur * Rrest^T  (rest basis -> 현재 basis)
                     Rrel = Rcur @ rest_basis[name].T
                     q_world = rotmat_to_quat(Rrel)
                 else:
@@ -297,6 +313,8 @@ def positions_to_local_quats(seq):
     return out, root
 
 
+
+
 def trim_seq(seq):
     n = len(seq)
     s = 0
@@ -308,8 +326,19 @@ def trim_seq(seq):
     return seq[s:e + 1] if s < e else seq
 
 
+def safe_name(word):
+    """파일 이름에 못 쓰는 문자 제거 (줄바꿈/탭/윈도우 금지문자)."""
+    s = word.strip()                          # 앞뒤 공백/줄바꿈 제거
+    s = re.sub(r'[\r\n\t]', '', s)            # 내부 줄바꿈/탭 제거
+    s = re.sub(r'[<>:"/\\|?*]', '_', s)       # 윈도우 파일명 금지문자 -> _
+    s = s.strip()
+    return s if s else "unknown"
+
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
+    print(">>> [부호안정화 버전] 실행 중 <<<")
+
     Xr = np.load(XR_PATH)                          # (N,T,50,3)
     y = np.load(Y_PATH, allow_pickle=True)
 
@@ -320,23 +349,33 @@ def main():
     catalog = {}
     print(f">> 단어 {len(by_word)}개, 클립 {len(y)}개")
 
+    used = {}  # 정리 후 이름 충돌 방지
     for i, (word, clips) in enumerate(sorted(by_word.items()), 1):
         seq = trim_seq(pick_best_clip(clips))
         bones, root = positions_to_local_quats(seq)
-        path = os.path.join(OUT_DIR, f"{word}.npz")
+
+        name = safe_name(word)
+        # 정리 후 이름이 겹치면 뒤에 번호 붙이기
+        if name in used:
+            used[name] += 1
+            name = f"{name}_{used[name]}"
+        else:
+            used[name] = 0
+
+        path = os.path.join(OUT_DIR, f"{name}.npz")
         np.savez_compressed(
             path,
             root=root,
             joint_names=np.array(JOINTS),
             **bones,
         )
-        catalog[word] = {
-            "file": f"{word}.npz",
+        catalog[word] = {                 # catalog 키는 원본 라벨 유지
+            "file": f"{name}.npz",        # 실제 저장 파일명
             "frames": int(seq.shape[0]),
             "clips_available": len(clips),
         }
         if i % 20 == 0 or i == len(by_word):
-            print(f"   {i}/{len(by_word)}  {word}  T={seq.shape[0]}")
+            print(f"   {i}/{len(by_word)}  {name}  T={seq.shape[0]}")
 
     with open(os.path.join(OUT_DIR, "catalog.json"), "w", encoding="utf-8") as f:
         json.dump(catalog, f, ensure_ascii=False, indent=2)
