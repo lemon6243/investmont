@@ -22,7 +22,7 @@ from load_dataset_3d import (
 # 설정 (경로는 본인 환경에 맞게)
 # ------------------------------------------------------------
 MORPHEME = r"C:\Users\LG\Downloads\수어 영상\1.Training\[라벨]01_real_word_morpheme"
-KEYPOINT = r"C:\Users\LG\Downloads\수어 영상\1.Training\[라벨]01_real_word_keypoint"
+KEYPOINT = r"D:\수어 영상\1.Training\[라벨]13_real_word_keypoint"
 
 ANGLES = None                 # None=전 각도, ['F']=정면만
 OUT_DIR = "dataset_all_3d"    # 2D와 완전히 분리된 폴더

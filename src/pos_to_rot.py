@@ -72,6 +72,79 @@ def quat_from_to(a, b):
     return q / (np.linalg.norm(q) + 1e-8)
 
 
+def make_basis(primary, secondary):
+    """
+    primary(주축=본 방향)와 secondary(보조축=손바닥 법선)로
+    정규직교 3x3 회전행렬을 만든다. 열: [x축, y축, z축].
+    x축 = primary 방향, z축 = primary와 secondary에 수직, y축 = z×x.
+    실패(평행/영벡터) 시 None.
+    """
+    x = primary / (np.linalg.norm(primary) + 1e-8)
+    s = secondary / (np.linalg.norm(secondary) + 1e-8)
+    z = np.cross(x, s)
+    zn = np.linalg.norm(z)
+    if zn < 1e-4:            # primary와 secondary가 거의 평행
+        return None
+    z = z / zn
+    y = np.cross(z, x)
+    return np.stack([x, y, z], axis=1).astype(np.float32)  # (3,3)
+
+
+def rotmat_to_quat(R):
+    """3x3 회전행렬 -> 쿼터니언 (x,y,z,w)."""
+    m00, m11, m22 = R[0, 0], R[1, 1], R[2, 2]
+    tr = m00 + m11 + m22
+    if tr > 0:
+        s = np.sqrt(tr + 1.0) * 2
+        w = 0.25 * s
+        x = (R[2, 1] - R[1, 2]) / s
+        y = (R[0, 2] - R[2, 0]) / s
+        z = (R[1, 0] - R[0, 1]) / s
+    elif m00 > m11 and m00 > m22:
+        s = np.sqrt(1.0 + m00 - m11 - m22) * 2
+        w = (R[2, 1] - R[1, 2]) / s
+        x = 0.25 * s
+        y = (R[0, 1] + R[1, 0]) / s
+        z = (R[0, 2] + R[2, 0]) / s
+    elif m11 > m22:
+        s = np.sqrt(1.0 + m11 - m00 - m22) * 2
+        w = (R[0, 2] - R[2, 0]) / s
+        x = (R[0, 1] + R[1, 0]) / s
+        y = 0.25 * s
+        z = (R[1, 2] + R[2, 1]) / s
+    else:
+        s = np.sqrt(1.0 + m22 - m00 - m11) * 2
+        w = (R[1, 0] - R[0, 1]) / s
+        x = (R[0, 2] + R[2, 0]) / s
+        y = (R[1, 2] + R[2, 1]) / s
+        z = 0.25 * s
+    q = np.array([x, y, z, w], np.float32)
+    return q / (np.linalg.norm(q) + 1e-8)
+
+
+def palm_normal(kp, hand_start):
+    """손목(0), 검지뿌리(5), 새끼뿌리(17)로 손바닥 법선 계산. 실패 시 None."""
+    p0 = kp[hand_start + 0]
+    p5 = kp[hand_start + 5]
+    p17 = kp[hand_start + 17]
+    if min(np.linalg.norm(p0), np.linalg.norm(p5), np.linalg.norm(p17)) < 1e-6:
+        return None
+    n = np.cross(p5 - p0, p17 - p0)
+    ln = np.linalg.norm(n)
+    if ln < 1e-6:
+        return None
+    return (n / ln).astype(np.float32)
+
+
+# basis 방식을 쓸 본과, 그 본이 참조할 손의 시작 인덱스
+#   lowerarm/hand 는 손바닥 법선으로 twist를 정의한다.
+#   왼손 시작 = 8, 오른손 시작 = 29 (JOINTS 순서: pose8 + lhand21 + rhand21)
+BASIS_BONES = {
+    "lowerarm_r": 29, "hand_r": 29,
+    "lowerarm_l": 8,  "hand_l": 8,
+}
+
+
 def quat_mul(q1, q2):
     x1, y1, z1, w1 = q1
     x2, y2, z2, w2 = q2
@@ -122,9 +195,12 @@ def build_rest_pose(seq):
             return f.copy()
     return seq[0].copy()
 
+
 # 언리얼 좌표계(x 앞, y 오른쪽, z 위) 기준 T포즈 본 방향.
 # send_mh_live.py가 seq_to_ue로 이미 언리얼 좌표로 바꿔서 넘기므로
 # rest를 언리얼 T포즈로 정의하면 계산된 회전이 뼈 0도(T포즈)에 맞는다.
+# (주의) basis 방식 본(lowerarm/hand)은 rest_basis를 따로 쓰므로 여기 값은
+#         basis 미적용 본에만 쓰인다.
 TPOSE_DIR = {
     "head":       np.array([0, 0, 1], np.float32),    # 목->코: 위
     "clavicle_r": np.array([0, 1, 0], np.float32),    # 목->오른어깨: 오른쪽(+Y)
@@ -146,7 +222,7 @@ for _a, _b, _name in HAND_CHAINS:
 
 def positions_to_local_quats(seq):
     """
-    seq: (T,50,3) 월드 위치
+    seq: (T,50,3) 월드 위치 (언리얼 좌표계)
     return: bones dict -> (T,4) 로컬 xyzw, root (T,3)
     """
     rest = build_rest_pose(seq)
@@ -158,18 +234,27 @@ def positions_to_local_quats(seq):
     root = np.zeros((T, 3), np.float32)
     rsh, lsh = J["r_shoulder"], J["l_shoulder"]
 
-    # rest 본 방향 (월드)
-        # rest 본 방향: 클립 첫 프레임이 아니라 고정 T포즈를 기준으로 사용.
-    # (이래야 모든 클립이 언리얼 T포즈와 같은 기준을 갖고,
-    #  팔이 엉뚱하게 돌지 않는다.)
+    # rest 본 방향: 클립 첫 프레임이 아니라 고정 T포즈를 기준으로 사용.
+    # (basis 미적용 본에만 쓰임. basis 본은 아래 rest_basis 사용.)
     rest_dir = {}
     for parent, child, name in BONES:
         if name in TPOSE_DIR:
             rest_dir[name] = TPOSE_DIR[name].copy()
         else:
-            # 정의 안 된 본은 안전하게 첫 프레임 방향 사용
             rest_dir[name] = rest[J[child]] - rest[J[parent]]
 
+    # basis 방식 본들의 rest basis 미리 계산
+    # (데이터 첫 유효 프레임=rest 자세 기준. 현재 basis와의 상대 회전을 낸다.)
+    rest_basis = {}
+    for name, hstart in BASIS_BONES.items():
+        parent = child = None
+        for p, c, nm in BONES:
+            if nm == name:
+                parent, child = p, c
+                break
+        prim = rest[J[child]] - rest[J[parent]]
+        sec = palm_normal(rest, hstart)
+        rest_basis[name] = make_basis(prim, sec) if sec is not None else None
 
     for t in range(T):
         kp = seq[t]
@@ -177,7 +262,6 @@ def positions_to_local_quats(seq):
             root[t] = (kp[rsh] + kp[lsh]) * 0.5
 
         world_q = {}  # 조인트 월드 회전
-        # 목은 단위
         world_q["neck"] = np.array([0, 0, 0, 1], np.float32)
         world_q["r_wrist"] = np.array([0, 0, 0, 1], np.float32)
         world_q["l_wrist"] = np.array([0, 0, 0, 1], np.float32)
@@ -191,8 +275,18 @@ def positions_to_local_quats(seq):
             if np.linalg.norm(cur) < 1e-6:
                 continue
 
-            # 월드 스윙: rest_dir -> 현재 방향
-            q_world = quat_from_to(rest_dir[name], cur)
+            # basis 방식 본이면 twist까지 계산, 아니면 방향만
+            if name in BASIS_BONES and rest_basis.get(name) is not None:
+                sec = palm_normal(kp, BASIS_BONES[name])
+                Rcur = make_basis(cur, sec) if sec is not None else None
+                if Rcur is not None:
+                    # 상대 회전 = Rcur * Rrest^T  (rest basis -> 현재 basis)
+                    Rrel = Rcur @ rest_basis[name].T
+                    q_world = rotmat_to_quat(Rrel)
+                else:
+                    q_world = quat_from_to(rest_dir[name], cur)
+            else:
+                q_world = quat_from_to(rest_dir[name], cur)
 
             q_parent = world_q.get(parent, np.array([0, 0, 0, 1], np.float32))
             q_local = quat_mul(quat_inv(q_parent), q_world)
