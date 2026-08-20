@@ -1,6 +1,10 @@
 # pos_to_rot.py
 # X_raw_3d.npy (N,T,50,3) 위치 -> 로컬 쿼터니언
 # 출력: dataset_all_3d/rots/{단어}.npz
+#
+# [rest 기준: 데이터 첫 유효 프레임(팔 내린 자세)로 통일]
+#   - 모든 본이 "데이터 첫 프레임 = 0도" 기준.
+#   - 언리얼에서는 팔 6개 본을 Add to Existing 으로 설정.
 
 import os
 import json
@@ -196,25 +200,20 @@ def build_rest_pose(seq):
     return seq[0].copy()
 
 
-# 언리얼 좌표계(x 앞, y 오른쪽, z 위) 기준 T포즈 본 방향.
-# send_mh_live.py가 seq_to_ue로 이미 언리얼 좌표로 바꿔서 넘기므로
-# rest를 언리얼 T포즈로 정의하면 계산된 회전이 뼈 0도(T포즈)에 맞는다.
-# (주의) basis 방식 본(lowerarm/hand)은 rest_basis를 따로 쓰므로 여기 값은
-#         basis 미적용 본에만 쓰인다.
+# [참고용으로만 남김 — 현재 파이프라인에서는 사용하지 않음]
+# 언리얼 T포즈 기준으로 되돌리고 싶을 때(A안) 참조하는 값.
+# 지금은 rest_dir 를 데이터 첫 프레임 방향으로 통일하므로 쓰이지 않는다.
 TPOSE_DIR = {
-    "head":       np.array([0, 0, 1], np.float32),    # 목->코: 위
-    "clavicle_r": np.array([0, 1, 0], np.float32),    # 목->오른어깨: 오른쪽(+Y)
-    "upperarm_r": np.array([0, 1, 0], np.float32),    # 오른팔: 오른쪽
+    "head":       np.array([0, 0, 1], np.float32),
+    "clavicle_r": np.array([0, 1, 0], np.float32),
+    "upperarm_r": np.array([0, 1, 0], np.float32),
     "lowerarm_r": np.array([0, 1, 0], np.float32),
     "hand_r":     np.array([0, 1, 0], np.float32),
-    "clavicle_l": np.array([0, -1, 0], np.float32),   # 목->왼어깨: 왼쪽(-Y)
-    "upperarm_l": np.array([0, -1, 0], np.float32),   # 왼팔: 왼쪽
+    "clavicle_l": np.array([0, -1, 0], np.float32),
+    "upperarm_l": np.array([0, -1, 0], np.float32),
     "lowerarm_l": np.array([0, -1, 0], np.float32),
     "hand_l":     np.array([0, -1, 0], np.float32),
 }
-
-# 손가락: T포즈에서 손가락은 팔과 같은 방향(바깥쪽)으로 뻗어 있다고 가정.
-# 오른손 손가락은 +Y, 왼손 손가락은 -Y.
 for _a, _b, _name in HAND_CHAINS:
     TPOSE_DIR[f"{_name}_r"] = np.array([0, 1, 0], np.float32)
     TPOSE_DIR[f"{_name}_l"] = np.array([0, -1, 0], np.float32)
@@ -224,6 +223,11 @@ def positions_to_local_quats(seq):
     """
     seq: (T,50,3) 월드 위치 (언리얼 좌표계)
     return: bones dict -> (T,4) 로컬 xyzw, root (T,3)
+
+    [rest 기준 통일]
+      - basis 미적용 본: rest_dir = 데이터 첫 유효 프레임의 본 방향
+      - basis 적용 본:   rest_basis = 데이터 첫 유효 프레임 기준 basis
+      -> 모든 본이 '데이터 첫 프레임 = 0도'. 언리얼은 Add to Existing.
     """
     rest = build_rest_pose(seq)
     T = seq.shape[0]
@@ -234,17 +238,14 @@ def positions_to_local_quats(seq):
     root = np.zeros((T, 3), np.float32)
     rsh, lsh = J["r_shoulder"], J["l_shoulder"]
 
-    # rest 본 방향: 클립 첫 프레임이 아니라 고정 T포즈를 기준으로 사용.
-    # (basis 미적용 본에만 쓰임. basis 본은 아래 rest_basis 사용.)
+    # rest 본 방향: 데이터 첫 유효 프레임(팔 내린 자세) 기준으로 통일.
+    # (basis 미적용 본에 쓰임. basis 본은 아래 rest_basis 사용.)
     rest_dir = {}
     for parent, child, name in BONES:
-        if name in TPOSE_DIR:
-            rest_dir[name] = TPOSE_DIR[name].copy()
-        else:
-            rest_dir[name] = rest[J[child]] - rest[J[parent]]
+        rest_dir[name] = rest[J[child]] - rest[J[parent]]
 
     # basis 방식 본들의 rest basis 미리 계산
-    # (데이터 첫 유효 프레임=rest 자세 기준. 현재 basis와의 상대 회전을 낸다.)
+    # (동일하게 데이터 첫 유효 프레임=rest 자세 기준.)
     rest_basis = {}
     for name, hstart in BASIS_BONES.items():
         parent = child = None

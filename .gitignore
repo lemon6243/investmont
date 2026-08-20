@@ -1,17 +1,24 @@
-﻿# 데이터/모델 (용량 큼, 깃에 올리지 않음)
+﻿# ===== 데이터 / 모델 (용량 큼, 깃에 올리지 않음) =====
 dataset/
 dataset_all/
+dataset_all_3d/
+dataset_sen_3d/
 *.npy
 *.pt
+*.npz
 
-# 파이썬 가상환경/캐시
+# ===== 원본 수어 영상 데이터 =====
+수어 영상/
+data/
+
+# ===== 파이썬 가상환경 / 캐시 =====
 venv/
 __pycache__/
 *.pyc
+*.pyo
 
-# 원본 수어 영상 데이터
-수어 영상/
-
-echo dataset_all/ >> .gitignore
-echo dataset_all_3d/ >> .gitignore
-echo __pycache__/ >> .gitignore
+# ===== 언리얼 프로젝트 (혹시 실수로 들어올 경우 대비) =====
+Saved/
+Intermediate/
+DerivedDataCache/
+Binaries/

@@ -79,3 +79,79 @@ for t in [0, len(seq)//4, len(seq)//2, 3*len(seq)//4, len(seq)-1]:
         continue
     d = wr - sh
     print(f"  f{t}: dx={d[0]:+.3f} dy={d[1]:+.3f} dz={d[2]:+.3f}")
+
+# ── 오른손 검지 회전 검증 (손가락 방향-only 방식 확인) ──
+print("\n[오른손 검지 마디별 방향 - 프레임별]")
+# rhand 인덱스: 손목29, 검지뿌리34, 검지2관절35, 검지3관절36, 검지끝37
+rh = rhand_start  # 29
+tip_chain = [
+    ("index_01(뿌리->2관절)", 5, 6),
+    ("index_02(2관절->3관절)", 6, 7),
+    ("index_03(3관절->끝)", 7, 8),
+]
+for label, a, b in tip_chain:
+    print(f"  [{label}]")
+    for t in [0, len(seq)//4, len(seq)//2, 3*len(seq)//4, len(seq)-1]:
+        pa, pb = seq[t, rh+a], seq[t, rh+b]
+        if min(np.linalg.norm(pa), np.linalg.norm(pb)) < 1e-6:
+            print(f"    f{t}: (데이터 없음)"); continue
+        d = pb - pa
+        d = d / (np.linalg.norm(d) + 1e-8)
+        print(f"    f{t}: 방향={d.round(3)}")
+
+# ── rest 프레임에서 손가락이 향하는 방향 ──
+print("\n[rest 프레임 손가락 방향 (TPOSE_DIR 가정 검증)]")
+ri2, rf2 = first_valid_frame(seq)
+for hand_name, hstart in [("오른손", rhand_start), ("왼손", lhand_start)]:
+    p_wrist = rf2[hstart + 0]
+    p_idx_base = rf2[hstart + 5]   # 검지뿌리
+    p_mid_tip = rf2[hstart + 12]   # 중지끝
+    if min(np.linalg.norm(p_wrist), np.linalg.norm(p_mid_tip)) < 1e-6:
+        print(f"  {hand_name}: 데이터 없음"); continue
+    finger_dir = p_mid_tip - p_wrist
+    finger_dir = finger_dir / (np.linalg.norm(finger_dir) + 1e-8)
+    print(f"  {hand_name} 손목->중지끝 방향: {finger_dir.round(3)}")
+
+    # ============================================================
+# 손가락 검증 (독립 실행 - 위쪽 변수에 의존 안 함)
+# ============================================================
+import numpy as np
+
+# 손 시작 인덱스 (JOINTS 순서: pose8 + lhand21 + rhand21)
+_LHAND = 8
+_RHAND = 29
+
+def _first_valid(s):
+    for i, f in enumerate(s):
+        if (np.linalg.norm(f, axis=1) > 1e-6).mean() > 0.3:
+            return i, f
+    return 0, s[0]
+
+print("\n[오른손 검지 마디별 방향 - 프레임별]")
+tip_chain = [
+    ("index_01(뿌리->2관절)", 5, 6),
+    ("index_02(2관절->3관절)", 6, 7),
+    ("index_03(3관절->끝)", 7, 8),
+]
+for label, a, b in tip_chain:
+    print(f"  [{label}]")
+    for t in [0, len(seq)//4, len(seq)//2, 3*len(seq)//4, len(seq)-1]:
+        pa, pb = seq[t, _RHAND+a], seq[t, _RHAND+b]
+        if min(np.linalg.norm(pa), np.linalg.norm(pb)) < 1e-6:
+            print(f"    f{t}: (데이터 없음)"); continue
+        d = pb - pa
+        d = d / (np.linalg.norm(d) + 1e-8)
+        print(f"    f{t}: 방향={d.round(3)}")
+
+print("\n[rest 프레임 손가락 방향 (TPOSE_DIR 가정 검증)]")
+ri2, rf2 = _first_valid(seq)
+print(f"  rest 프레임: f{ri2}")
+for hand_name, hstart in [("오른손", _RHAND), ("왼손", _LHAND)]:
+    p_wrist = rf2[hstart + 0]
+    p_mid_tip = rf2[hstart + 12]   # 중지끝
+    if min(np.linalg.norm(p_wrist), np.linalg.norm(p_mid_tip)) < 1e-6:
+        print(f"  {hand_name}: 데이터 없음"); continue
+    finger_dir = p_mid_tip - p_wrist
+    finger_dir = finger_dir / (np.linalg.norm(finger_dir) + 1e-8)
+    print(f"  {hand_name} 손목->중지끝 방향: {finger_dir.round(3)}")
+
