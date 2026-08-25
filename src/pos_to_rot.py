@@ -14,6 +14,23 @@ from collections import defaultdict
 
 from keypoint_schema_3d import POSE_ORDER, N_POSE, N_HAND
 
+# pos_to_rot.py 상단에 추가
+# ============================================================
+# MetaHuman Reference Pose Offset
+# Unreal 에디터 → Skeletal Mesh → Bone Transform → Local Rotation
+# 집에서 확인 후 값을 채워넣으세요.
+# ============================================================
+MH_REF_POSE_LOCAL = {
+    # TODO: 집에서 UE 에디터에서 본별 Bone Space Local Rotation 확인 후 채우기
+    "upperarm_l": np.array([0, 0, 0, 1], np.float32),  # placeholder
+    "lowerarm_l": np.array([0, 0, 0, 1], np.float32),
+    "hand_l":      np.array([0, 0, 0, 1], np.float32),
+    "upperarm_r": np.array([0, 0, 0, 1], np.float32),
+    "lowerarm_r": np.array([0, 0, 0, 1], np.float32),
+    "hand_r":      np.array([0, 0, 0, 1], np.float32),
+}
+
+
 DATA_DIR = "dataset_all_3d"
 XR_PATH = os.path.join(DATA_DIR, "X_raw_3d.npy")
 Y_PATH = os.path.join(DATA_DIR, "y_all_3d.npy")
@@ -235,7 +252,7 @@ def positions_to_local_quats(seq):
     [뼈 길이] rest 프레임에서 부모->자식 거리를 재서 bone_len 으로 반환.
              (FK 미리보기에서 관절 위치 복원에 사용)
     """
-    NORMAL_SIM_THRESH = 0.85   # 이보다 급격히 어긋나면 노이즈로 보고 직전 유지
+    NORMAL_SIM_THRESH = 0.6   # 수어의 빠른 손목 회전 대응 (cos⁻¹(0.6) ≈ 53°)
 
     rest = build_rest_pose(seq)
     T = seq.shape[0]
@@ -313,7 +330,13 @@ def positions_to_local_quats(seq):
                 q_world = quat_from_to(rest_dir[name], cur)
 
             q_parent = world_q.get(parent, np.array([0, 0, 0, 1], np.float32))
-            q_local = quat_mul(quat_inv(q_parent), q_world)
+            # === 추가: MetaHuman Reference Pose 보정 ===
+            if name in MH_REF_POSE_LOCAL:
+                ref = MH_REF_POSE_LOCAL[name]
+                # q_local 은 "rest 대비 변화량". 
+                # 여기에 MetaHuman ref pose rotation을 더해준다.
+                q_local = quat_mul(q_local, ref)
+            
             out[name][t] = q_local
             world_q[child] = q_world
 
