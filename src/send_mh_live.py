@@ -115,6 +115,8 @@ def pack_frame(ue_frame, bones, t, word, arms_only):
         "word": word,
         "i": int(t),
         "n": int(ue_frame.shape[0]) if False else None,  # 아래에서 덮음
+        "space": "bone",      # ← 추가
+        "mode": "replace",    # ← 추가
         "pts": pts,
         "q": q,
     }
@@ -160,20 +162,8 @@ def main():
     try:
         while True:
             for t in range(T):
-                msg = {
-                    "type": "frame",
-                    "word": word,
-                    "i": t,
-                    "n": T,
-                    "space": "bone",      # 추가
-                    "mode": "replace",    # 추가
-                    "pts": ...,
-                    "q": ...,
-                }
-                for name, arr in bones.items():
-                    if arms_only and name not in ARM_BONES:
-                        continue
-                    msg["q"][name] = [round(float(x), 5) for x in arr[t]]
+                msg = pack_frame(ue[t], bones, t, word, arms_only)
+                msg["n"] = T   # 총 프레임 수 덮어쓰기
 
                 raw = json.dumps(msg, ensure_ascii=False).encode("utf-8")
                 if sock is not None:
@@ -187,6 +177,7 @@ def main():
             time.sleep(0.35)
     except KeyboardInterrupt:
         print("\n>> 중지")
+
 
 
 if __name__ == "__main__":
