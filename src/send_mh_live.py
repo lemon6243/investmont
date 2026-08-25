@@ -165,8 +165,10 @@ def main():
                     "word": word,
                     "i": t,
                     "n": T,
-                    "pts": ue[t].reshape(-1).astype(float).tolist(),
-                    "q": {},
+                    "space": "bone",      # 추가
+                    "mode": "replace",    # 추가
+                    "pts": ...,
+                    "q": ...,
                 }
                 for name, arr in bones.items():
                     if arms_only and name not in ARM_BONES:
