@@ -72,6 +72,8 @@ class UeBridge:
             "word": word,
             "i": int(i),
             "n": int(n),
+            "space": "bone",      # 추가
+            "mode": "replace",    # 추가
             "pts": [float(x) for x in pts],
             "q": q,
         })
