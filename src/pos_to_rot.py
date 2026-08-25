@@ -330,11 +330,11 @@ def positions_to_local_quats(seq):
                 q_world = quat_from_to(rest_dir[name], cur)
 
             q_parent = world_q.get(parent, np.array([0, 0, 0, 1], np.float32))
-            # === 추가: MetaHuman Reference Pose 보정 ===
+            q_local = quat_mul(quat_inv(q_parent), q_world)   # ← 이 줄 복구!
+            
+            # === MetaHuman Reference Pose 보정 ===
             if name in MH_REF_POSE_LOCAL:
                 ref = MH_REF_POSE_LOCAL[name]
-                # q_local 은 "rest 대비 변화량". 
-                # 여기에 MetaHuman ref pose rotation을 더해준다.
                 q_local = quat_mul(q_local, ref)
             
             out[name][t] = q_local
