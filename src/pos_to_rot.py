@@ -20,15 +20,17 @@ from keypoint_schema_3d import POSE_ORDER, N_POSE, N_HAND
 # Unreal 에디터 → Skeletal Mesh → Bone Transform → Local Rotation
 # 집에서 확인 후 값을 채워넣으세요.
 # ============================================================
+# pos_to_rot.py (기존 placeholder를 아래로 교체)
+
 MH_REF_POSE_LOCAL = {
-    # TODO: 집에서 UE 에디터에서 본별 Bone Space Local Rotation 확인 후 채우기
-    "upperarm_l": np.array([0, 0, 0, 1], np.float32),  # placeholder
-    "lowerarm_l": np.array([0, 0, 0, 1], np.float32),
-    "hand_l":      np.array([0, 0, 0, 1], np.float32),
-    "upperarm_r": np.array([0, 0, 0, 1], np.float32),
-    "lowerarm_r": np.array([0, 0, 0, 1], np.float32),
-    "hand_r":      np.array([0, 0, 0, 1], np.float32),
+    "upperarm_l": np.array([-0.0296, -0.3844, 0.0303, 0.9221], np.float32),
+    "lowerarm_l": np.array([ 0.0000,  0.3150, 0.0000, 0.9491], np.float32),
+    "hand_l":      np.array([ 0.0000,  0.0000,-0.7071, 0.7071], np.float32),
+    "upperarm_r": np.array([-0.0296, -0.3844, 0.0303, 0.9221], np.float32),
+    "lowerarm_r": np.array([ 0.0000,  0.3150, 0.0000, 0.9491], np.float32),
+    "hand_r":      np.array([ 0.0000,  0.0000,-0.7071, 0.7071], np.float32),
 }
+
 
 
 DATA_DIR = "dataset_all_3d"
